@@ -14,6 +14,7 @@ from utils.env_wrappers import SubprocVecEnv, DummyVecEnv
 from algorithms.maddpg import MADDPG
 
 USE_CUDA = True if torch.cuda.is_available() else False  # torch.cuda.is_available()
+os.environ["CUDA_VISIBLE_DEVICES"] = '3'
 
 def make_parallel_env(env_id, n_rollout_threads, seed, discrete_action):
     def get_env_fn(rank):
@@ -66,9 +67,9 @@ def run(config):
     adv_reward=0
 
     for ep_i in range(0, config.n_episodes, config.n_rollout_threads):
-        print("After Episode %i, epi_reward= %6.4f" % (ep_i,
+        #print("After Episode %i, epi_reward= %6.4f" % (ep_i,
                                         epi_reward))
-        print("After Episode %i, adv_reward= %6.4f" % (ep_i,
+        #print("After Episode %i, adv_reward= %6.4f" % (ep_i,
                                         adv_reward))
         epi_reward=0
         adv_reward=0
@@ -92,7 +93,7 @@ def run(config):
             # rearrange actions to be per environment
             actions = [[ac[i] for ac in agent_actions] for i in range(config.n_rollout_threads)]
             next_obs, rewards, dones, infos = env.step(actions)
-            if (ep_i+1)%1==0:
+            if config.display and (ep_i+1)%1==0:
                 import time
                 time.sleep(0.05)
                 env.render()
@@ -167,6 +168,8 @@ if __name__ == '__main__':
                         default="MADDPG", type=str,
                         choices=['MADDPG', 'DDPG'])
     parser.add_argument("--discrete_action",
+                        action='store_true')
+    parser.add_argument("--display",
                         action='store_true')
 
     config = parser.parse_args()

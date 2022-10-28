@@ -1,6 +1,9 @@
-__pycache__/
-runs/
-model/
+algorithms/__pycache__/
+baselines/__pycache__/
+multiagent/__pycache__/
+
+bin/
+models/
 *.cpython-38.pyc
 *.pyc
 *.ubuntu
