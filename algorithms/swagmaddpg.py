@@ -12,7 +12,7 @@ class SWAGMADDPG(object):
     Wrapper class for DDPG-esque (i.e. also MADDPG) agents in multi-agent task
     """
     def __init__(self, agent_init_params, alg_types,
-                 gamma=0.95, tau=0.01, lr=0.01, hidden_dim=64,
+                 gamma=0.99, tau=0.01, lr=0.01, hidden_dim=64,
                  discrete_action=False):
         """
         Inputs:

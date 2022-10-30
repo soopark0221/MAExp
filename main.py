@@ -33,6 +33,7 @@ def make_parallel_env(env_id, n_rollout_threads, seed, discrete_action):
 
 def run(config):
     model_dir = Path('./models') / config.env_id / config.model_name
+    print(config)
     if not model_dir.exists():
         curr_run = 'run1'
     else:
@@ -81,7 +82,8 @@ def run(config):
                                   hidden_dim=config.hidden_dim)
 
     for ep_i in range(0, config.n_episodes, config.n_rollout_threads):
-        #print("After Episode %i, epi_reward= %6.4f" % (ep_i, epi_reward))
+        if (ep_i+1)%100==0:
+            print("After Episode %i, epi_reward= %6.4f" % (ep_i, epi_reward/maddpg.nagents))
         #print("After Episode %i, adv_reward= %6.4f" % (ep_i, adv_reward))
         epi_reward=0
         adv_reward=0
@@ -111,7 +113,7 @@ def run(config):
             # rearrange actions to be per environment
             actions = [[ac[i] for ac in agent_actions] for i in range(config.n_rollout_threads)]
             next_obs, rewards, dones, infos = env.step(actions)
-            if config.display and (ep_i+1)%1==0:
+            if config.display and (ep_i+1)%500==0:
                 import time
                 time.sleep(0.05)
                 env.render()
@@ -165,7 +167,7 @@ if __name__ == '__main__':
     parser.add_argument("--n_rollout_threads", default=1, type=int)
     parser.add_argument("--n_training_threads", default=6, type=int)
     parser.add_argument("--buffer_length", default=int(1e6), type=int)
-    parser.add_argument("--n_episodes", default=25000, type=int)
+    parser.add_argument("--n_episodes", default=100000, type=int)
     parser.add_argument("--episode_length", default=25, type=int)
     parser.add_argument("--steps_per_update", default=100, type=int)
     parser.add_argument("--batch_size",
@@ -180,10 +182,10 @@ if __name__ == '__main__':
     parser.add_argument("--tau", default=0.005, type=float)
     parser.add_argument("--agent_alg",
                         default="MADDPG", type=str,
-                        choices=['MADDPG', 'DDPG'])
+                        choices=['MADDPG', 'DDPG', 'Bootc'])
     parser.add_argument("--adversary_alg",
                         default="MADDPG", type=str,
-                        choices=['MADDPG', 'DDPG'])
+                        choices=['MADDPG', 'DDPG', 'Bootc'])
     parser.add_argument("--discrete_action",
                         action='store_true')
     parser.add_argument("--alg", default='maddpg', type=str)
