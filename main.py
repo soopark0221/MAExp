@@ -15,7 +15,6 @@ from algorithms.maddpg import MADDPG
 from algorithms.swagmaddpg import SWAGMADDPG
 
 USE_CUDA = True if torch.cuda.is_available() else False  # torch.cuda.is_available()
-os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
 def make_parallel_env(env_id, n_rollout_threads, seed, discrete_action):
     def get_env_fn(rank):
@@ -85,6 +84,7 @@ def run(config):
         if (ep_i+1)%100==0:
             print("After Episode %i, epi_reward= %6.4f" % (ep_i, epi_reward/maddpg.nagents))
         #print("After Episode %i, adv_reward= %6.4f" % (ep_i, adv_reward))
+
         epi_reward=0
         adv_reward=0
         obs = env.reset()
