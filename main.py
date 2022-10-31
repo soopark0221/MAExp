@@ -15,7 +15,6 @@ from algorithms.maddpg import MADDPG
 from algorithms.swagmaddpg import SWAGMADDPG
 
 USE_CUDA = True if torch.cuda.is_available() else False  # torch.cuda.is_available()
-os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
 def make_parallel_env(env_id, n_rollout_threads, seed, discrete_action):
     def get_env_fn(rank):
@@ -32,6 +31,7 @@ def make_parallel_env(env_id, n_rollout_threads, seed, discrete_action):
         return SubprocVecEnv([get_env_fn(i) for i in range(n_rollout_threads)])
 
 def run(config):
+    #os.environ["CUDA_VISIBLE_DEVICES"] = config.gpu_no
     model_dir = Path('./models') / config.env_id / config.model_name
     if not model_dir.exists():
         curr_run = 'run1'
@@ -135,7 +135,7 @@ def run(config):
                         c_loss, a_loss=maddpg.update(sample, a_i, logger=logger)
                         total_closs+=float(c_loss)
                         total_aloss+=abs(float(a_loss))
-                    print("c_loss=",round(total_closs/maddpg.nagents,4), "a_loss=",round(total_aloss/maddpg.nagents,4))
+                    print(f'After Episode {ep_i+1} epi_reward {epi_reward:.4f} adv_reward {adv_reward:.4f} c_loss {round(total_closs/maddpg.nagents,4)} a_loss {round(total_aloss/maddpg.nagents,4)}')
                     maddpg.update_all_targets()
                 maddpg.prep_rollouts(device='cpu')
         ep_rews = replay_buffer.get_average_rewards(
@@ -191,6 +191,7 @@ if __name__ == '__main__':
     parser.add_argument("--collect_freq", default=2, type=int)
     parser.add_argument("--display",
                         action='store_true')
+    parser.add_argument("--gpu_no", default='0', type=str)
     config = parser.parse_args()
 
     run(config)
