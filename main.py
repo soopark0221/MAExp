@@ -12,9 +12,9 @@ from utils.make_env import make_env
 from utils.buffer import ReplayBuffer
 from utils.env_wrappers import SubprocVecEnv, DummyVecEnv
 from algorithms.maddpg import MADDPG
+from algorithms.swagmaddpg import SWAGMADDPG
 
 USE_CUDA = True if torch.cuda.is_available() else False  # torch.cuda.is_available()
-os.environ["CUDA_VISIBLE_DEVICES"] = '3'
 
 def make_parallel_env(env_id, n_rollout_threads, seed, discrete_action):
     def get_env_fn(rank):
@@ -32,6 +32,7 @@ def make_parallel_env(env_id, n_rollout_threads, seed, discrete_action):
 
 def run(config):
     model_dir = Path('./models') / config.env_id / config.model_name
+    print(config)
     if not model_dir.exists():
         curr_run = 'run1'
     else:
@@ -66,11 +67,24 @@ def run(config):
     epi_reward=0
     adv_reward=0
 
+    if config.alg == 'swag':
+        maddpg = SWAGMADDPG.init_from_env(env, agent_alg=config.agent_alg,
+                                  adversary_alg=config.adversary_alg,
+                                  tau=config.tau,
+                                  lr=config.lr,
+                                  hidden_dim=config.hidden_dim)
+    elif config.alg == 'maddpg':
+        maddpg = MADDPG.init_from_env(env, agent_alg=config.agent_alg,
+                                  adversary_alg=config.adversary_alg,
+                                  tau=config.tau,
+                                  lr=config.lr,
+                                  hidden_dim=config.hidden_dim)
+
     for ep_i in range(0, config.n_episodes, config.n_rollout_threads):
-        #print("After Episode %i, epi_reward= %6.4f" % (ep_i,
-                                        epi_reward))
-        #print("After Episode %i, adv_reward= %6.4f" % (ep_i,
-                                        adv_reward))
+        if (ep_i+1)%100==0:
+            print("After Episode %i, epi_reward= %6.4f" % (ep_i, epi_reward/maddpg.nagents))
+        #print("After Episode %i, adv_reward= %6.4f" % (ep_i, adv_reward))
+
         epi_reward=0
         adv_reward=0
         obs = env.reset()
@@ -81,11 +95,17 @@ def run(config):
         maddpg.scale_noise(config.final_noise_scale + (config.init_noise_scale - config.final_noise_scale) * explr_pct_remaining)
         maddpg.reset_noise()
 
+        if config.alg == 'swag':
+            if ep_i % config.collect_freq == 0:
+                maddpg.collect_params()  # collect actor network params 
+            if ep_i % config.sample_freq == 0:
+                maddpg.sample_params()  # update path collecting model
+
         for et_i in range(config.episode_length):
             # rearrange observations to be per agent, and convert to torch Variable
             torch_obs = [Variable(torch.Tensor(np.vstack(obs[:, i])),
-                                  requires_grad=False)
-                         for i in range(maddpg.nagents)]
+                                requires_grad=False)
+                        for i in range(maddpg.nagents)]
             # get actions as torch Variables
             torch_agent_actions = maddpg.step(torch_obs, explore=True)
             # convert actions to numpy arrays
@@ -93,7 +113,7 @@ def run(config):
             # rearrange actions to be per environment
             actions = [[ac[i] for ac in agent_actions] for i in range(config.n_rollout_threads)]
             next_obs, rewards, dones, infos = env.step(actions)
-            if config.display and (ep_i+1)%1==0:
+            if config.display and (ep_i+1)%500==0:
                 import time
                 time.sleep(0.05)
                 env.render()
@@ -113,7 +133,7 @@ def run(config):
                     total_closs, total_aloss=0,0
                     for a_i in range(maddpg.nagents):
                         sample = replay_buffer.sample(config.batch_size,
-                                                      to_gpu=USE_CUDA)
+                                                    to_gpu=USE_CUDA)
                         c_loss, a_loss=maddpg.update(sample, a_i, logger=logger)
                         total_closs+=float(c_loss)
                         total_aloss+=abs(float(a_loss))
@@ -135,7 +155,6 @@ def run(config):
     logger.export_scalars_to_json(str(log_dir / 'summary.json'))
     logger.close()
 
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("env_id", help="Name of environment")
@@ -148,7 +167,7 @@ if __name__ == '__main__':
     parser.add_argument("--n_rollout_threads", default=1, type=int)
     parser.add_argument("--n_training_threads", default=6, type=int)
     parser.add_argument("--buffer_length", default=int(1e6), type=int)
-    parser.add_argument("--n_episodes", default=25000, type=int)
+    parser.add_argument("--n_episodes", default=100000, type=int)
     parser.add_argument("--episode_length", default=25, type=int)
     parser.add_argument("--steps_per_update", default=100, type=int)
     parser.add_argument("--batch_size",
@@ -163,15 +182,17 @@ if __name__ == '__main__':
     parser.add_argument("--tau", default=0.005, type=float)
     parser.add_argument("--agent_alg",
                         default="MADDPG", type=str,
-                        choices=['MADDPG', 'DDPG'])
+                        choices=['MADDPG', 'DDPG', 'Bootc'])
     parser.add_argument("--adversary_alg",
                         default="MADDPG", type=str,
-                        choices=['MADDPG', 'DDPG'])
+                        choices=['MADDPG', 'DDPG', 'Bootc'])
     parser.add_argument("--discrete_action",
                         action='store_true')
+    parser.add_argument("--alg", default='maddpg', type=str)
+    parser.add_argument("--sample_freq", default=100, type=int)
+    parser.add_argument("--collect_freq", default=2, type=int)
     parser.add_argument("--display",
                         action='store_true')
-
     config = parser.parse_args()
 
     run(config)

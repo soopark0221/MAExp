@@ -4,6 +4,7 @@ from gym.spaces import Box, Discrete
 from utils.networks import MLPNetwork
 from utils.misc import soft_update, average_gradients, onehot_from_logits, gumbel_softmax
 from utils.agents import DDPGAgent
+from utils.bootmaddpgc import BootcAgent
 
 MSELoss = torch.nn.MSELoss()
 
@@ -12,7 +13,7 @@ class MADDPG(object):
     Wrapper class for DDPG-esque (i.e. also MADDPG) agents in multi-agent task
     """
     def __init__(self, agent_init_params, alg_types,
-                 gamma=0.95, tau=0.01, lr=0.01, hidden_dim=64,
+                 gamma=0.99, tau=0.01, lr=0.01, hidden_dim=64,
                  discrete_action=False):
         """
         Inputs:
@@ -31,10 +32,17 @@ class MADDPG(object):
         """
         self.nagents = len(alg_types)
         self.alg_types = alg_types
-        self.agents = [DDPGAgent(lr=lr, discrete_action=discrete_action,
+        self.agents=[]
+        for i,params in enumerate(agent_init_params):
+            if alg_types[i] == 'Bootc':
+                self.agents.append(BootcAgent(lr=lr, discrete_action=discrete_action,
                                  hidden_dim=hidden_dim,
-                                 **params)
-                       for params in agent_init_params]
+                                 **params))
+            else:
+                self.agents.append(DDPGAgent(lr=lr, discrete_action=discrete_action,
+                                 hidden_dim=hidden_dim,
+                                 **params))
+
         self.agent_init_params = agent_init_params
         self.gamma = gamma
         self.tau = tau
@@ -92,78 +100,86 @@ class MADDPG(object):
             logger (SummaryWriter from Tensorboard-Pytorch):
                 If passed in, important quantities will be logged
         """
-        obs, acs, rews, next_obs, dones = sample
-        curr_agent = self.agents[agent_i]
 
-        curr_agent.critic_optimizer.zero_grad()
-        if self.alg_types[agent_i] == 'MADDPG':
-            if self.discrete_action: # one-hot encode action
-                all_trgt_acs = [onehot_from_logits(pi(nobs)) for pi, nobs in
-                                zip(self.target_policies, next_obs)]
-            else:
-                all_trgt_acs = [pi(nobs) for pi, nobs in zip(self.target_policies,
-                                                             next_obs)]
-            trgt_vf_in = torch.cat((*next_obs, *all_trgt_acs), dim=1)
-        else:  # DDPG
-            if self.discrete_action:
-                trgt_vf_in = torch.cat((next_obs[agent_i],
-                                        onehot_from_logits(
-                                            curr_agent.target_policy(
-                                                next_obs[agent_i]))),
-                                       dim=1)
-            else:
-                trgt_vf_in = torch.cat((next_obs[agent_i],
-                                        curr_agent.target_policy(next_obs[agent_i])),
-                                       dim=1)
-        target_value = (rews[agent_i].view(-1, 1) + self.gamma *
-                        curr_agent.target_critic(trgt_vf_in) *
-                        (1 - dones[agent_i].view(-1, 1)))
-
-        if self.alg_types[agent_i] == 'MADDPG':
-            vf_in = torch.cat((*obs, *acs), dim=1)
-        else:  # DDPG
-            vf_in = torch.cat((obs[agent_i], acs[agent_i]), dim=1)
-        actual_value = curr_agent.critic(vf_in)
-        vf_loss = MSELoss(actual_value, target_value.detach())
-        vf_loss.backward()
-        if parallel:
-            average_gradients(curr_agent.critic)
-        torch.nn.utils.clip_grad_norm(curr_agent.critic.parameters(), 0.5)
-        curr_agent.critic_optimizer.step()
-
-        curr_agent.policy_optimizer.zero_grad()
-
-        if self.discrete_action:
-            # Forward pass as if onehot (hard=True) but backprop through a differentiable
-            # Gumbel-Softmax sample. The MADDPG paper uses the Gumbel-Softmax trick to backprop
-            # through discrete categorical samples, but I'm not sure if that is
-            # correct since it removes the assumption of a deterministic policy for
-            # DDPG. Regardless, discrete policies don't seem to learn properly without it.
-            curr_pol_out = curr_agent.policy(obs[agent_i])
-            curr_pol_vf_in = gumbel_softmax(curr_pol_out, hard=True)
+        
+        if self.alg_types[agent_i] == 'Bootc':
+            vf_loss, pol_loss=self.agents[agent_i].update(sample,agent_i,self.agents)
+        
         else:
-            curr_pol_out = curr_agent.policy(obs[agent_i])
-            curr_pol_vf_in = curr_pol_out
-        if self.alg_types[agent_i] == 'MADDPG':
-            all_pol_acs = []
-            for i, pi, ob in zip(range(self.nagents), self.policies, obs):
-                if i == agent_i:
-                    all_pol_acs.append(curr_pol_vf_in)
-                elif self.discrete_action:
-                    all_pol_acs.append(onehot_from_logits(pi(ob)))
+            obs, acs, rews, next_obs, dones = sample
+            curr_agent = self.agents[agent_i]
+
+            curr_agent.critic_optimizer.zero_grad()
+            if self.alg_types[agent_i] == 'MADDPG':
+                if self.discrete_action: # one-hot encode action
+                    all_trgt_acs = [onehot_from_logits(pi(nobs)) for pi, nobs in
+                                    zip(self.target_policies, next_obs)]
                 else:
-                    all_pol_acs.append(pi(ob))
-            vf_in = torch.cat((*obs, *all_pol_acs), dim=1)
-        else:  # DDPG
-            vf_in = torch.cat((obs[agent_i], curr_pol_vf_in),
-                              dim=1)
-        pol_loss = -curr_agent.critic(vf_in).mean()
-        pol_loss += (curr_pol_out**2).mean() * 1e-3
-        pol_loss.backward()
-        if parallel:
-            average_gradients(curr_agent.policy)
-        torch.nn.utils.clip_grad_norm(curr_agent.policy.parameters(), 0.5)
-        curr_agent.policy_optimizer.step()
+                    all_trgt_acs = [pi(nobs) for pi, nobs in zip(self.target_policies,
+                                                                next_obs)]
+                trgt_vf_in = torch.cat((*next_obs, *all_trgt_acs), dim=1)
+            elif self.alg_types[agent_i] == 'DDPG':  # DDPG
+                if self.discrete_action:
+                    trgt_vf_in = torch.cat((next_obs[agent_i],
+                                            onehot_from_logits(
+                                                curr_agent.target_policy(
+                                                    next_obs[agent_i]))),
+                                        dim=1)
+                else:
+                    trgt_vf_in = torch.cat((next_obs[agent_i],
+                                            curr_agent.target_policy(next_obs[agent_i])),
+                                        dim=1)
+            target_value = (rews[agent_i].view(-1, 1) + self.gamma *
+                            curr_agent.target_critic(trgt_vf_in) *
+                            (1 - dones[agent_i].view(-1, 1)))
+
+            if self.alg_types[agent_i] == 'MADDPG':
+                vf_in = torch.cat((*obs, *acs), dim=1)
+            elif self.alg_types[agent_i] == 'DDPG':  # DDPG
+                vf_in = torch.cat((obs[agent_i], acs[agent_i]), dim=1)
+            actual_value = curr_agent.critic(vf_in)
+            vf_loss = MSELoss(actual_value, target_value.detach())
+            vf_loss.backward()
+            if parallel:
+                average_gradients(curr_agent.critic)
+            torch.nn.utils.clip_grad_norm(curr_agent.critic.parameters(), 0.5)
+            curr_agent.critic_optimizer.step()
+
+            curr_agent.policy_optimizer.zero_grad()
+
+            if self.discrete_action:
+                # Forward pass as if onehot (hard=True) but backprop through a differentiable
+                # Gumbel-Softmax sample. The MADDPG paper uses the Gumbel-Softmax trick to backprop
+                # through discrete categorical samples, but I'm not sure if that is
+                # correct since it removes the assumption of a deterministic policy for
+                # DDPG. Regardless, discrete policies don't seem to learn properly without it.
+                curr_pol_out = curr_agent.policy(obs[agent_i])
+                curr_pol_vf_in = gumbel_softmax(curr_pol_out, hard=True)
+            else:
+                curr_pol_out = curr_agent.policy(obs[agent_i])
+                curr_pol_vf_in = curr_pol_out
+            if self.alg_types[agent_i] == 'MADDPG':
+                all_pol_acs = []
+                for i, pi, ob in zip(range(self.nagents), self.policies, obs):
+                    if i == agent_i:
+                        all_pol_acs.append(curr_pol_vf_in)
+                    elif self.discrete_action:
+                        all_pol_acs.append(acs[i].detach()) # XXX: Why resample? -> use acs
+                    else:
+                        all_pol_acs.append(acs[i].detach())
+                vf_in = torch.cat((*obs, *all_pol_acs), dim=1)
+            else:  # DDPG
+                vf_in = torch.cat((obs[agent_i], curr_pol_vf_in),
+                                dim=1)
+            pol_loss = -curr_agent.critic(vf_in).mean()
+            pol_loss += (curr_pol_out**2).mean() * 1e-3
+            pol_loss.backward()
+            if parallel:
+                average_gradients(curr_agent.policy)
+            torch.nn.utils.clip_grad_norm(curr_agent.policy.parameters(), 0.5)
+            curr_agent.policy_optimizer.step()
+
+
         if logger is not None:
             logger.add_scalars('agent%i/losses' % agent_i,
                                {'vf_loss': vf_loss,
@@ -232,7 +248,7 @@ class MADDPG(object):
 
     @classmethod
     def init_from_env(cls, env, agent_alg="MADDPG", adversary_alg="MADDPG",
-                      gamma=0.95, tau=0.01, lr=0.01, hidden_dim=64):
+                      gamma=0.99, tau=0.01, lr=0.01, hidden_dim=64):
         """
         Instantiate instance of this class from multi-agent environment
         """
@@ -249,14 +265,15 @@ class MADDPG(object):
                 discrete_action = True
                 get_shape = lambda x: x.n
             num_out_pol = get_shape(acsp)
-            if algtype == "MADDPG":
+            if algtype == "DDPG":
+                num_in_critic = obsp.shape[0] + get_shape(acsp)
+            else:
                 num_in_critic = 0
                 for oobsp in env.observation_space:
                     num_in_critic += oobsp.shape[0]
                 for oacsp in env.action_space:
                     num_in_critic += get_shape(oacsp)
-            else:
-                num_in_critic = obsp.shape[0] + get_shape(acsp)
+
             agent_init_params.append({'num_in_pol': num_in_pol,
                                       'num_out_pol': num_out_pol,
                                       'num_in_critic': num_in_critic})

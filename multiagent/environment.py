@@ -33,7 +33,7 @@ class MultiAgentEnv(gym.Env):
         # if true, even the action is continuous, action will be performed discretely
         self.force_discrete_action = world.discrete_action if hasattr(world, 'discrete_action') else False
         # if true, every agent has the same reward
-        self.shared_reward = False
+        self.shared_reward = world.collaborative if hasattr(world,'collaborative') else False
         self.time = 0
 
         # configure spaces
