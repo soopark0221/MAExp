@@ -82,8 +82,8 @@ def run(config):
                                   hidden_dim=config.hidden_dim)
 
     for ep_i in range(0, config.n_episodes, config.n_rollout_threads):
-        if (ep_i+1)%100==0:
-            print("After Episode %i, epi_reward= %6.4f" % (ep_i, epi_reward/maddpg.nagents))
+        #if (ep_i+1)%100==0:
+        #    print("After Episode %i, epi_reward= %6.4f" % (ep_i, epi_reward/maddpg.nagents))
         #print("After Episode %i, adv_reward= %6.4f" % (ep_i, adv_reward))
 
         epi_reward=0
@@ -138,7 +138,7 @@ def run(config):
                         c_loss, a_loss=maddpg.update(sample, a_i, logger=logger)
                         total_closs+=float(c_loss)
                         total_aloss+=abs(float(a_loss))
-                    print(f'After Episode {ep_i+1} epi_reward {epi_reward:.4f} adv_reward {adv_reward:.4f} c_loss {round(total_closs/maddpg.nagents,4)} a_loss {round(total_aloss/maddpg.nagents,4)}')
+                    print(f'After Episode {ep_i+1} epi_reward {epi_reward/maddpg.nagents:.4f} adv_reward {adv_reward/3:.4f} c_loss {round(total_closs/maddpg.nagents,4)} a_loss {round(total_aloss/maddpg.nagents,4)}')
                     maddpg.update_all_targets()
                 maddpg.prep_rollouts(device='cpu')
         ep_rews = replay_buffer.get_average_rewards(

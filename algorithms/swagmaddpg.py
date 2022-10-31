@@ -158,9 +158,9 @@ class SWAGMADDPG(object):
                 if i == agent_i:
                     all_pol_acs.append(curr_pol_vf_in)
                 elif self.discrete_action:
-                    all_pol_acs.append(onehot_from_logits(pi(ob)))
+                    all_pol_acs.append(acs[i].detach()) # XXX: Why resample? -> use acs
                 else:
-                    all_pol_acs.append(pi(ob))
+                    all_pol_acs.append(acs[i].detach())
             vf_in = torch.cat((*obs, *all_pol_acs), dim=1)
         else:  # DDPG
             vf_in = torch.cat((obs[agent_i], curr_pol_vf_in),
