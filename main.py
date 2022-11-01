@@ -33,7 +33,7 @@ def make_parallel_env(env_id, n_rollout_threads, seed, discrete_action):
 def run(config):
     #os.environ["CUDA_VISIBLE_DEVICES"] = config.gpu_no
     model_dir = Path('./models') / config.env_id / config.model_name
-    print(config)
+
     if not model_dir.exists():
         curr_run = 'run1'
     else:
@@ -48,6 +48,8 @@ def run(config):
     log_dir = run_dir / 'logs'
     os.makedirs(log_dir)
     logger = SummaryWriter(str(log_dir))
+    with open(run_dir / 'config.txt','a') as f:
+        f.write(str(config))
 
     torch.manual_seed(config.seed)
     np.random.seed(config.seed)
@@ -67,6 +69,7 @@ def run(config):
     t = 0
     epi_reward=0
     adv_reward=0
+    
 
     if config.alg == 'swag':
         maddpg = SWAGMADDPG.init_from_env(env, agent_alg=config.agent_alg,
@@ -82,12 +85,12 @@ def run(config):
                                   hidden_dim=config.hidden_dim)
 
     for ep_i in range(0, config.n_episodes, config.n_rollout_threads):
-        #if (ep_i+1)%100==0:
-        #    print("After Episode %i, epi_reward= %6.4f" % (ep_i, epi_reward/maddpg.nagents))
-        #print("After Episode %i, adv_reward= %6.4f" % (ep_i, adv_reward))
 
         epi_reward=0
         adv_reward=0
+        ag_reward=0
+        c_loss, a_loss= None, None
+
         obs = env.reset()
         # obs.shape = (n_rollout_threads, nagent)(nobs), nobs differs per agent so not tensor
         maddpg.prep_rollouts(device='cpu')
@@ -122,9 +125,11 @@ def run(config):
             obs = next_obs
             epi_reward+=np.sum(np.array(rewards))
             adv_reward+=np.sum(np.array(rewards[0][:3]))
+            if maddpg.nagents>3:
+                ag_reward+=np.sum(np.array(rewards[0][3:]))
 
             t += config.n_rollout_threads
-            if (len(replay_buffer) >= config.batch_size and
+            if (ep_i>=config.n_epi_before_train and
                 (t % config.steps_per_update) < config.n_rollout_threads):
                 if USE_CUDA:
                     maddpg.prep_training(device='gpu')
@@ -137,18 +142,37 @@ def run(config):
                                                     to_gpu=USE_CUDA)
                         c_loss, a_loss=maddpg.update(sample, a_i, logger=logger)
                         total_closs+=float(c_loss)
-                        total_aloss+=abs(float(a_loss))
-                    print(f'After Episode {ep_i+1} epi_reward {epi_reward/maddpg.nagents:.4f} adv_reward {adv_reward/3:.4f} c_loss {round(total_closs/maddpg.nagents,4)} a_loss {round(total_aloss/maddpg.nagents,4)}')
+                        total_aloss+=float(a_loss)
+                    if (ep_i+1)%100==0:
+                        if env.envs[0].shared_reward:
+                            print("Episode %i, epi_reward= %6.4f" % (ep_i, epi_reward/maddpg.nagents))
+
+                        else:  
+                            print("Episode %i, adv_reward= %6.4f & agent_rew= %6.4f" % (ep_i, adv_reward, ag_reward))
+                        
+                        print(f"c_loss: {round(total_closs/maddpg.nagents,4)} a_loss: {round(total_aloss/maddpg.nagents,4)}")
+
                     maddpg.update_all_targets()
                 maddpg.prep_rollouts(device='cpu')
-        ep_rews = replay_buffer.get_average_rewards(
-            config.episode_length * config.n_rollout_threads)
-        for a_i, a_ep_rew in enumerate(ep_rews):
-            logger.add_scalar('agent%i/mean_episode_rewards' % a_i, a_ep_rew, ep_i)
+
+        if logger is not None:
+            logger.add_scalar('rewards/epi_rew', epi_reward,ep_i)
+            logger.add_scalar('rewards/adv_rew', adv_reward,ep_i)
+            logger.add_scalar('rewards/agent_rew', ag_reward,ep_i)
+
+            if (c_loss, a_loss) != (None, None):
+                logger.add_scalar('losses/c_loss', c_loss,ep_i)
+                logger.add_scalar('losses/a_loss', a_loss,ep_i)
+
+            
+
+        # ep_rews = replay_buffer.get_average_rewards(
+        #     config.episode_length * config.n_rollout_threads)
+        # for a_i, a_ep_rew in enumerate(ep_rews):
+        #     logger.add_scalar('agent%i/mean_episode_rewards' % a_i, a_ep_rew, ep_i)
 
         if ep_i % config.save_interval < config.n_rollout_threads:
             os.makedirs(run_dir / 'incremental', exist_ok=True)
-            maddpg.save(run_dir / 'incremental' / ('model_ep%i.pt' % (ep_i + 1)))
             maddpg.save(run_dir / 'model.pt')
 
     maddpg.save(run_dir / 'model.pt')
@@ -168,7 +192,8 @@ if __name__ == '__main__':
     parser.add_argument("--n_rollout_threads", default=1, type=int)
     parser.add_argument("--n_training_threads", default=6, type=int)
     parser.add_argument("--buffer_length", default=int(1e6), type=int)
-    parser.add_argument("--n_episodes", default=100000, type=int)
+    parser.add_argument("--n_episodes", default=30000, type=int)
+    parser.add_argument("--n_epi_before_train", default=100, type=int)
     parser.add_argument("--episode_length", default=25, type=int)
     parser.add_argument("--steps_per_update", default=100, type=int)
     parser.add_argument("--batch_size",

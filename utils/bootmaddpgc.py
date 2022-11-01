@@ -132,10 +132,8 @@ class BootcAgent(object):
         for i in range(len(agents)):
             if i == agent_i:
                 all_pol_acs.append(curr_pol_vf_in)
-            elif self.discrete_action:
-                all_pol_acs.append(acs[i].detach()) # XXX: Why resample? -> use acs
             else:
-                all_pol_acs.append(acs[i].detach())
+                all_pol_acs.append(acs[i].detach()) # XXX: according to the paper
         vf_in = torch.cat((*obs, *all_pol_acs), dim=1)
 
         random_head=np.random.randint(self.n_ensemble)

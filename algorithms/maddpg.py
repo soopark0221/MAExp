@@ -160,13 +160,12 @@ class MADDPG(object):
                 curr_pol_vf_in = curr_pol_out
             if self.alg_types[agent_i] == 'MADDPG':
                 all_pol_acs = []
-                for i, pi, ob in zip(range(self.nagents), self.policies, obs):
+                for i in range(self.nagents):
                     if i == agent_i:
                         all_pol_acs.append(curr_pol_vf_in)
-                    elif self.discrete_action:
-                        all_pol_acs.append(acs[i].detach()) # XXX: Why resample? -> use acs
                     else:
-                        all_pol_acs.append(acs[i].detach())
+                        all_pol_acs.append(acs[i].detach()) # XXX: according to the paper
+                        
                 vf_in = torch.cat((*obs, *all_pol_acs), dim=1)
             else:  # DDPG
                 vf_in = torch.cat((obs[agent_i], curr_pol_vf_in),
@@ -179,12 +178,6 @@ class MADDPG(object):
             torch.nn.utils.clip_grad_norm(curr_agent.policy.parameters(), 0.5)
             curr_agent.policy_optimizer.step()
 
-
-        if logger is not None:
-            logger.add_scalars('agent%i/losses' % agent_i,
-                               {'vf_loss': vf_loss,
-                                'pol_loss': pol_loss},
-                               self.niter)
         return vf_loss.detach(), pol_loss.detach()
 
     def update_all_targets(self):
