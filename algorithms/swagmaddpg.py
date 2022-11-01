@@ -177,6 +177,11 @@ class SWAGMADDPG(object):
                                {'vf_loss': vf_loss,
                                 'pol_loss': pol_loss},
                                self.niter)
+
+        if self.niter % 100 == 0:
+            curr_agent.critic_optimizer.param_groups[0]['lr'] *= 0.98
+            curr_agent.policy_optimizer.param_groups[0]['lr'] *= 0.98
+
         return vf_loss.detach(), pol_loss.detach()
 
     def update_all_targets(self):
@@ -300,10 +305,10 @@ class SWAGMADDPG(object):
         #    a.swag_network.collect_model(a.policy)
 
     def sample_params(self):
-        for agent in range(self.nagents):
-            self.swags[agent].sample(self.policies_sample[agent])
-        #for a in self.agents:
-        #    a.swag_network.sample(a.policy_sample)
+        #for agent in range(self.nagents):
+        #    self.swags[agent].sample(self.policies_sample[agent])
+        for a in self.agents:
+            a.swag_network.sample(a.policy_sample)
 
 
     def flatten(self, lst):
