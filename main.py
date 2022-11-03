@@ -13,6 +13,7 @@ from utils.buffer import ReplayBuffer
 from utils.env_wrappers import SubprocVecEnv, DummyVecEnv
 from algorithms.maddpg import MADDPG
 from algorithms.swagmaddpg import SWAGMADDPG
+from algorithms.maddpg_share import MADDPG_Share
 
 USE_CUDA = True if torch.cuda.is_available() else False  # torch.cuda.is_available()
 
@@ -57,15 +58,7 @@ def run(config):
         torch.set_num_threads(config.n_training_threads)
     env = make_parallel_env(config.env_id, config.n_rollout_threads, config.seed,
                             config.discrete_action)
-    maddpg = MADDPG.init_from_env(env, agent_alg=config.agent_alg,
-                                  adversary_alg=config.adversary_alg,
-                                  tau=config.tau,
-                                  lr=config.lr,
-                                  hidden_dim=config.hidden_dim)
-    replay_buffer = ReplayBuffer(config.buffer_length, maddpg.nagents,
-                                 [obsp.shape[0] for obsp in env.observation_space],
-                                 [acsp.shape[0] if isinstance(acsp, Box) else acsp.n
-                                  for acsp in env.action_space])
+
     t = 0
     epi_reward=0
     adv_reward=0
@@ -83,6 +76,17 @@ def run(config):
                                   tau=config.tau,
                                   lr=config.lr,
                                   hidden_dim=config.hidden_dim)
+    elif config.alg == 'share':
+        maddpg=MADDPG_Share.init_from_env(env, agent_alg=config.agent_alg,
+                                  adversary_alg=config.adversary_alg,
+                                  tau=config.tau,
+                                  lr=config.lr,
+                                  hidden_dim=config.hidden_dim)
+
+    replay_buffer = ReplayBuffer(config.buffer_length, maddpg.nagents,
+                                 [obsp.shape[0] for obsp in env.observation_space],
+                                 [acsp.shape[0] if isinstance(acsp, Box) else acsp.n
+                                  for acsp in env.action_space])
 
     for ep_i in range(0, config.n_episodes, config.n_rollout_threads):
 
