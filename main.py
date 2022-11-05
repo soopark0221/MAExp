@@ -33,6 +33,8 @@ def make_parallel_env(env_id, n_rollout_threads, seed, discrete_action):
 
 def run(config):
     #os.environ["CUDA_VISIBLE_DEVICES"] = config.gpu_no
+    torch.manual_seed(config.seed)
+    np.random.seed(config.seed)
     model_dir = Path('./models') / config.env_id / config.model_name
 
     if not model_dir.exists():
@@ -52,8 +54,6 @@ def run(config):
     with open(run_dir / 'config.txt','a') as f:
         f.write(str(config))
 
-    torch.manual_seed(config.seed)
-    np.random.seed(config.seed)
     if not USE_CUDA:
         torch.set_num_threads(config.n_training_threads)
     env = make_parallel_env(config.env_id, config.n_rollout_threads, config.seed,
@@ -83,10 +83,19 @@ def run(config):
                                   lr=config.lr,
                                   hidden_dim=config.hidden_dim)
 
-    replay_buffer = ReplayBuffer(config.buffer_length, maddpg.nagents,
+    alg_types = [config.adversary_alg if atype == 'adversary' else config.agent_alg for
+                     atype in env.agent_types]
+    if 'Boota' in alg_types:
+        replay_buffer = ReplayBuffer(config.buffer_length, maddpg.nagents,
                                  [obsp.shape[0] for obsp in env.observation_space],
                                  [acsp.shape[0] if isinstance(acsp, Box) else acsp.n
                                   for acsp in env.action_space])
+    else:
+        replay_buffer = ReplayBuffer(config.buffer_length, maddpg.nagents,
+                                 [obsp.shape[0] for obsp in env.observation_space],
+                                 [acsp.shape[0] if isinstance(acsp, Box) else acsp.n
+                                  for acsp in env.action_space])
+
 
     for ep_i in range(0, config.n_episodes, config.n_rollout_threads):
 
@@ -164,9 +173,9 @@ def run(config):
             logger.add_scalar('rewards/adv_rew', adv_reward,ep_i)
             logger.add_scalar('rewards/agent_rew', ag_reward,ep_i)
 
-            if (c_loss, a_loss) != (None, None):
-                logger.add_scalar('losses/c_loss', c_loss,ep_i)
-                logger.add_scalar('losses/a_loss', a_loss,ep_i)
+            if (total_closs, total_aloss) != (0, 0):
+                logger.add_scalar('losses/c_loss', total_closs/maddpg.nagents,ep_i)
+                logger.add_scalar('losses/a_loss', total_aloss/maddpg.nagents,ep_i)
 
             
 
@@ -195,7 +204,7 @@ if __name__ == '__main__':
                         help="Random seed")
     parser.add_argument("--n_rollout_threads", default=1, type=int)
     parser.add_argument("--n_training_threads", default=6, type=int)
-    parser.add_argument("--buffer_length", default=int(1e6), type=int)
+    parser.add_argument("--buffer_length", default=int(5*1e5), type=int)
     parser.add_argument("--n_episodes", default=30000, type=int)
     parser.add_argument("--n_epi_before_train", default=100, type=int)
     parser.add_argument("--episode_length", default=25, type=int)
