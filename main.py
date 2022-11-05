@@ -103,6 +103,7 @@ def run(config):
         adv_reward=0
         ag_reward=0
         c_loss, a_loss= None, None
+        total_closs, total_aloss = 0, 0
 
         obs = env.reset()
         # obs.shape = (n_rollout_threads, nagent)(nobs), nobs differs per agent so not tensor
