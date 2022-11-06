@@ -106,7 +106,7 @@ def run(config):
         maddpg.scale_noise(config.final_noise_scale + (config.init_noise_scale - config.final_noise_scale) * explr_pct_remaining)
         maddpg.reset_noise()
 
-        if 'SWAG' in config.agent_alg or 'SWAG' in config.adversary_alg:
+        if 'SWAG' in alg_types:
             if ep_i % config.collect_freq == 0:
                 maddpg.collect_params()  # collect actor network params 
             if ep_i % config.sample_freq == 0:

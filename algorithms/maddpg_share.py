@@ -5,6 +5,8 @@ from utils.networks import MLPNetwork
 from utils.misc import soft_update, average_gradients, onehot_from_logits, gumbel_softmax
 from utils.agents import DDPGAgent
 from utils.bootmaddpgc import BootcAgent
+from utils.swag_agents import SWAGDDPGAgent
+
 
 MSELoss = torch.nn.MSELoss()
 
@@ -33,12 +35,17 @@ class MADDPG_Share(object):
         self.nagents = len(agent_types)
         self.agent_types = agent_types
         self.alg_types = alg_types
+        self.type_idx = type_idx
 
         self.shared_agents=[]
         for i in type_idx:
             params=agent_init_params[i]
             if self.alg_types[i] == 'Bootc':
                 self.shared_agents.append(BootcAgent(lr=lr, discrete_action=discrete_action,
+                                 hidden_dim=hidden_dim,
+                                 **params))
+            elif alg_types[i] == 'SWAG':
+                self.shared_agents.append(SWAGDDPGAgent(lr=lr, discrete_action=discrete_action,
                                  hidden_dim=hidden_dim,
                                  **params))
             else:
@@ -118,7 +125,7 @@ class MADDPG_Share(object):
             curr_agent = self.agents[agent_i]
 
             curr_agent.critic_optimizer.zero_grad()
-            if self.alg_types[agent_i] == 'MADDPG':
+            if self.alg_types[agent_i] == 'MADDPG' or self.alg_types[agent_i] == 'SWAG':
                 if self.discrete_action: # one-hot encode action
                     all_trgt_acs = [onehot_from_logits(pi(nobs)) for pi, nobs in
                                     zip(self.target_policies, next_obs)]
@@ -141,7 +148,7 @@ class MADDPG_Share(object):
                             curr_agent.target_critic(trgt_vf_in) *
                             (1 - dones[agent_i].view(-1, 1)))
 
-            if self.alg_types[agent_i] == 'MADDPG':
+            if self.alg_types[agent_i] == 'MADDPG' or self.alg_types[agent_i] == 'SWAG':
                 vf_in = torch.cat((*obs, *acs), dim=1)
             elif self.alg_types[agent_i] == 'DDPG':  # DDPG
                 vf_in = torch.cat((obs[agent_i], acs[agent_i]), dim=1)
@@ -166,7 +173,7 @@ class MADDPG_Share(object):
             else:
                 curr_pol_out = curr_agent.policy(obs[agent_i])
                 curr_pol_vf_in = curr_pol_out
-            if self.alg_types[agent_i] == 'MADDPG':
+            if self.alg_types[agent_i] == 'MADDPG' or self.alg_types[agent_i] == 'SWAG':
                 all_pol_acs = []
                 for i in range(self.nagents):
                     if i == agent_i:
@@ -226,8 +233,11 @@ class MADDPG_Share(object):
             self.trgt_critic_dev = device
 
     def prep_rollouts(self, device='cpu'):
-        for a in self.agents:
+        for idx, a in enumerate(self.agents):
             a.policy.eval()
+            if self.alg_types[idx] == 'SWAG':
+                a.policy_sample.eval()
+
         if device == 'gpu':
             fn = lambda x: x.cuda()
         else:
@@ -258,7 +268,6 @@ class MADDPG_Share(object):
         type_idx=[0]
         if 'adversary' in agent_types:
             type_idx.append(agent_types.index('agent'))
-
         alg_types = [adversary_alg if atype == 'adversary' else agent_alg for
                      atype in agent_types]
 
@@ -306,3 +315,23 @@ class MADDPG_Share(object):
         for a, params in zip(instance.agents, save_dict['agent_params']):
             a.load_params(params)
         return instance
+
+    def collect_params(self):
+        for idx in self.type_idx:
+            if self.alg_types[idx] == 'SWAG': # to do: check if share networks
+                self.agents[idx].swag_network.collect_model(self.agents[idx].policy)
+        #for idx, a in enumerate(self.agents):
+        #    if self.alg_types[idx] == 'SWAG':
+        #        a.swag_network.collect_model(a.policy)
+
+    def sample_params(self):
+        for idx in self.type_idx:
+            if self.alg_types[idx] == 'SWAG':  # to do: check if share networks
+                self.agents[idx].swag_network.sample(self.agents[idx].policy_sample)
+        #for idx, a in enumerate(self.agents):
+        #    if self.alg_types[idx] == 'SWAG':
+        #        a.swag_network.sample(a.policy_sample)
+
+    def flatten(self, lst):
+        tmp = [i.contiguous().view(-1,1) for i in lst]
+        return torch.cat(tmp).view(-1)
