@@ -303,18 +303,14 @@ class MADDPG(object):
 
 
     def collect_params(self):
-        #for agent in range(self.nagents):
-        #    self.swags[agent].collect_model(self.policies[agent])
-        for i in range(len(self.alg_types)):
-            if self.alg_types[i] == 'SWAG':
-                self.agents[i].swag_network.collect_model(self.agents[i].policy)
+        for idx, a in enumerate(self.agents):
+            if self.alg_types[idx] == 'SWAG':
+                a.swag_network.collect_model(a.policy)
 
     def sample_params(self):
-        #for agent in range(self.nagents):
-        #    self.swags[agent].sample(self.policies_sample[agent])
-        for i in range(len(self.alg_types)):
-            if self.alg_types[i] == 'SWAG':
-                self.agents[i].swag_network.sample(self.agents[i].policy_sample)
+        for idx, a in enumerate(self.agents):
+            if self.alg_types[idx] == 'SWAG':
+                a.swag_network.sample(a.policy_sample)
 
 
     def flatten(self, lst):
