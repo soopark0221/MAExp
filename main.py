@@ -63,14 +63,7 @@ def run(config):
     epi_reward=0
     adv_reward=0
     
-
-    if config.alg == 'swag':
-        maddpg = SWAGMADDPG.init_from_env(env, agent_alg=config.agent_alg,
-                                  adversary_alg=config.adversary_alg,
-                                  tau=config.tau,
-                                  lr=config.lr,
-                                  hidden_dim=config.hidden_dim)
-    elif config.alg == 'maddpg':
+    if config.alg == 'maddpg':
         maddpg = MADDPG.init_from_env(env, agent_alg=config.agent_alg,
                                   adversary_alg=config.adversary_alg,
                                   tau=config.tau,
@@ -113,7 +106,7 @@ def run(config):
         maddpg.scale_noise(config.final_noise_scale + (config.init_noise_scale - config.final_noise_scale) * explr_pct_remaining)
         maddpg.reset_noise()
 
-        if config.alg == 'swag':
+        if 'SWAG' in config.agent_alg or 'SWAG' in config.adversary_alg:
             if ep_i % config.collect_freq == 0:
                 maddpg.collect_params()  # collect actor network params 
             if ep_i % config.sample_freq == 0:
@@ -222,10 +215,10 @@ if __name__ == '__main__':
     parser.add_argument("--tau", default=0.005, type=float)
     parser.add_argument("--agent_alg",
                         default="MADDPG", type=str,
-                        choices=['MADDPG', 'DDPG', 'Bootc'])
+                        choices=['MADDPG', 'DDPG', 'Bootc', 'SWAG'])
     parser.add_argument("--adversary_alg",
                         default="MADDPG", type=str,
-                        choices=['MADDPG', 'DDPG', 'Bootc'])
+                        choices=['MADDPG', 'DDPG', 'Bootc', 'SWAG'])
     parser.add_argument("--discrete_action",
                         action='store_true')
     parser.add_argument("--alg", default='maddpg', type=str)
