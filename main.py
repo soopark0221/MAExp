@@ -68,12 +68,14 @@ def run(config):
                                   adversary_alg=config.adversary_alg,
                                   tau=config.tau,
                                   lr=config.lr,
+                                  swag_lr=config.swag_lr,
                                   hidden_dim=config.hidden_dim)
     elif config.alg == 'share':
         maddpg=MADDPG_Share.init_from_env(env, agent_alg=config.agent_alg,
                                   adversary_alg=config.adversary_alg,
                                   tau=config.tau,
                                   lr=config.lr,
+                                  swag_lr=config.swag_lr,
                                   hidden_dim=config.hidden_dim)
 
     alg_types = [config.adversary_alg if atype == 'adversary' else config.agent_alg for
@@ -212,6 +214,7 @@ if __name__ == '__main__':
     parser.add_argument("--save_interval", default=1000, type=int)
     parser.add_argument("--hidden_dim", default=64, type=int)
     parser.add_argument("--lr", default=7e-4, type=float)
+    parser.add_argument("--swag_lr", default=1e-3, type=float)
     parser.add_argument("--tau", default=0.005, type=float)
     parser.add_argument("--agent_alg",
                         default="MADDPG", type=str,

@@ -15,7 +15,7 @@ class MADDPG_Share(object):
     Wrapper class for DDPG-esque (i.e. also MADDPG) agents in multi-agent task
     """
     def __init__(self, agent_init_params, agent_types, alg_types, type_idx,
-                 gamma=0.99, tau=0.01, lr=0.01, hidden_dim=64,
+                 gamma=0.99, tau=0.01, lr=0.01, swag_lr=0.001, hidden_dim=64,
                  discrete_action=False):
         """
         Inputs:
@@ -45,7 +45,7 @@ class MADDPG_Share(object):
                                  hidden_dim=hidden_dim,
                                  **params))
             elif alg_types[i] == 'SWAG':
-                self.shared_agents.append(SWAGDDPGAgent(lr=lr, discrete_action=discrete_action,
+                self.shared_agents.append(SWAGDDPGAgent(lr=swag_lr, discrete_action=discrete_action,
                                  hidden_dim=hidden_dim,
                                  **params))
             else:
@@ -193,6 +193,11 @@ class MADDPG_Share(object):
             torch.nn.utils.clip_grad_norm(curr_agent.policy.parameters(), 0.5)
             curr_agent.policy_optimizer.step()
 
+        if self.alg_types[agent_i] == 'SWAG':
+            if self.niter % 100 == 0:
+                curr_agent.critic_optimizer.param_groups[0]['lr'] *= 0.98
+                curr_agent.policy_optimizer.param_groups[0]['lr'] *= 0.98
+
         return vf_loss.detach(), pol_loss.detach()
 
     def update_all_targets(self):
@@ -259,7 +264,7 @@ class MADDPG_Share(object):
 
     @classmethod
     def init_from_env(cls, env, agent_alg="MADDPG", adversary_alg="MADDPG",
-                      gamma=0.99, tau=0.01, lr=0.01, hidden_dim=64):
+                      gamma=0.99, tau=0.01, lr=0.01, swag_lr=0.001, hidden_dim=64):
         """
         Instantiate instance of this class from multi-agent environment
         """
@@ -293,7 +298,7 @@ class MADDPG_Share(object):
             agent_init_params.append({'num_in_pol': num_in_pol,
                                       'num_out_pol': num_out_pol,
                                       'num_in_critic': num_in_critic})
-        init_dict = {'gamma': gamma, 'tau': tau, 'lr': lr,
+        init_dict = {'gamma': gamma, 'tau': tau, 'lr': lr, 'swag_lr': swag_lr,
                      'hidden_dim': hidden_dim,
                      'agent_types': agent_types,
                      'alg_types': alg_types,
