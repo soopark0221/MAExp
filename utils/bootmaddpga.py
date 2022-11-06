@@ -21,6 +21,7 @@ class BootaAgent(object):
         """
         self.n_ensemble=n_ensemble
         self.gamma=gamma
+
         self.policy = torch.nn.ModuleList([MLPNetwork(num_in_pol, num_out_pol,
                                  hidden_dim=hidden_dim,
                                  constrain_out=True,
@@ -56,7 +57,7 @@ class BootaAgent(object):
         else:
             self.exploration.scale = scale
 
-    def step(self, obs, explore=False):
+    def step(self, obs, actor_idx, explore=False):
         """
         Take a step forward in environment for a minibatch of observations
         Inputs:
@@ -66,7 +67,7 @@ class BootaAgent(object):
             action (PyTorch Variable): Actions for this agent
         """
 
-        action = self.policy(obs)
+        action = self.policy[actor_idx](obs)
         if self.discrete_action:
             if explore:
                 action = gumbel_softmax(action, hard=True)
@@ -80,69 +81,75 @@ class BootaAgent(object):
         return action
 
     def update(self, sample,agent_i, agents):
-        obs, acs, rews, next_obs, dones = sample
-
+        obs, acs, rews, next_obs, dones, ids = sample
+        
         self.critic_optimizer.zero_grad()
-        trgt_pol=[a.target_policy for a in agents]
+        trgt_pol=[a.target_policy for a in agents]         
+        all_trgt_acs=[]
 
-        if self.discrete_action: # one-hot encode action
-            all_trgt_acs = [onehot_from_logits(pi(nobs)) for pi, nobs in
-                            zip(trgt_pol, next_obs)]
-        else:
-            all_trgt_acs = [pi(nobs) for pi, nobs in zip(trgt_pol,
-                                                            next_obs)]
+        for a_i in range(len(acs)):
+            for trgt in trgt_pol:
+                trgt.eval()
+            if self.discrete_action: # one-hot encode action
+                all_trgt_acs.append(torch.stack([onehot_from_logits(trgt_pol[a_i](nobs.unsqueeze(0))).squeeze() if torch.isnan(ids[a_i][i]) 
+                                                    else onehot_from_logits(trgt_pol[a_i][int(ids[a_i][i])](nobs.unsqueeze(0))).squeeze() 
+                                                    for i, nobs in enumerate(next_obs[a_i])]))
+            else:
+                all_trgt_acs.append(torch.stack([trgt_pol[a_i](nobs.unsqueeze(0)).squeeze() if torch.isnan(ids[a_i][i]) 
+                                                    else trgt_pol[a_i][int(ids[a_i][i])](nobs.unsqueeze(0)).squeeze() 
+                                                    for i, nobs in enumerate(next_obs[a_i])]))
+
         trgt_vf_in = torch.cat((*next_obs, *all_trgt_acs), dim=1)
-        target_value = torch.stack([ rews[agent_i].view(-1, 1) + self.gamma *
-                        self.target_critic[i](trgt_vf_in) *
-                        (1 - dones[agent_i].view(-1, 1)) for i in range(self.n_ensemble)])
-
+        target_value = (rews[agent_i].view(-1, 1) + self.gamma *
+                            self.target_critic(trgt_vf_in) *
+                            (1 - dones[agent_i].view(-1, 1)))
         vf_in = torch.cat((*obs, *acs), dim=1)
 
-        actual_value = torch.stack([ self.critic[i](vf_in) for i in range(self.n_ensemble)])
-        vf_loss=[]
-        
-        for head in range(self.n_ensemble):
-            mask=torch.tensor(np.random.binomial(self.n_ensemble,0.9,len(obs[0])))
-            used=torch.sum(mask)
-            closs = torch.nn.MSELoss(reduction='none')(actual_value[head], target_value[head].detach())
-            closs*=mask.unsqueeze(1)
-            closs=torch.sum(closs/used)
-            vf_loss.append(closs)
-        if len(vf_loss)>0:
-            vf_loss=sum(vf_loss)/float(self.n_ensemble)
-            vf_loss.backward()
-            torch.nn.utils.clip_grad_norm(self.critic.parameters(), 0.5)
-            self.critic_optimizer.step()
+        actual_value = self.critic(vf_in)
+        loss_func=torch.nn.MSELoss()
+        vf_loss = loss_func(actual_value, target_value.detach())
+        vf_loss.backward()
+        torch.nn.utils.clip_grad_norm(self.critic.parameters(), 0.5)
+        self.critic_optimizer.step()
 
         self.policy_optimizer.zero_grad()
-
-        if self.discrete_action:
-            # Forward pass as if onehot (hard=True) but backprop through a differentiable
-            # Gumbel-Softmax sample. The MADDPG paper uses the Gumbel-Softmax trick to backprop
-            # through discrete categorical samples, but I'm not sure if that is
-            # correct since it removes the assumption of a deterministic policy for
-            # DDPG. Regardless, discrete policies don't seem to learn properly without it.
-            curr_pol_out = self.policy(obs[agent_i])
-            curr_pol_vf_in = gumbel_softmax(curr_pol_out, hard=True)
-        else:
-            curr_pol_out = self.policy(obs[agent_i])
-            curr_pol_vf_in = curr_pol_out
-        
-        all_pol_acs = []
-        for i in range(len(agents)):
-            if i == agent_i:
-                all_pol_acs.append(curr_pol_vf_in)
+        pol_loss=[]
+        for head in range(self.n_ensemble):
+            if self.discrete_action:
+                # Forward pass as if onehot (hard=True) but backprop through a differentiable
+                # Gumbel-Softmax sample. The MADDPG paper uses the Gumbel-Softmax trick to backprop
+                # through discrete categorical samples, but I'm not sure if that is
+                # correct since it removes the assumption of a deterministic policy for
+                # DDPG. Regardless, discrete policies don't seem to learn properly without it.
+                curr_pol_out = self.policy[head](obs[agent_i])
+                curr_pol_vf_in = gumbel_softmax(curr_pol_out, hard=True)
             else:
-                all_pol_acs.append(acs[i].detach()) # XXX: according to the paper
-        vf_in = torch.cat((*obs, *all_pol_acs), dim=1)
+                curr_pol_out = self.policy[head](obs[agent_i])
+                curr_pol_vf_in = curr_pol_out
+            
+            all_pol_acs = []
+            for i in range(len(agents)):
+                if i == agent_i:
+                    all_pol_acs.append(curr_pol_vf_in)
+                else:
+                    all_pol_acs.append(acs[i].detach()) # XXX: according to the paper
+            vf_in = torch.cat((*obs, *all_pol_acs), dim=1)
 
-        random_head=np.random.randint(self.n_ensemble)
-        pol_loss = -self.critic[random_head](vf_in).mean()
-        pol_loss += (curr_pol_out**2).mean() * 1e-3
-        pol_loss.backward()
-
-        torch.nn.utils.clip_grad_norm(self.policy.parameters(), 0.5)
-        self.policy_optimizer.step()
+            if torch.cuda.is_available():
+                mask=torch.cuda.FloatTensor(np.random.binomial(self.n_ensemble,0.9,len(obs[0])))
+            else:
+                mask=torch.FloatTensor(np.random.binomial(self.n_ensemble,0.9,len(obs[0])))
+            used=torch.sum(mask)
+            head_aloss = -self.critic(vf_in)
+            head_aloss += ((curr_pol_out**2).mean(dim=1)).unsqueeze(1) * 1e-3
+            head_aloss *= mask.unsqueeze(1)
+            head_aloss = torch.sum(head_aloss/used)
+            pol_loss.append(head_aloss)
+        if len(pol_loss)>0:
+            pol_loss=sum(pol_loss)/float(self.n_ensemble)
+            pol_loss.backward()
+            torch.nn.utils.clip_grad_norm(self.policy.parameters(), 0.5)
+            self.policy_optimizer.step()
 
         return vf_loss.detach(), pol_loss.detach()
 
