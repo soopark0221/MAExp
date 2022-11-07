@@ -6,13 +6,13 @@ from .misc import hard_update, gumbel_softmax, onehot_from_logits
 from .noise import OUNoise
 from .swag import SWAG
 from copy import deepcopy
-
+import torch
 class SWAGDDPGAgent(object):
     """
     General class for DDPG agents (policy, critic, target policy, target
     critic, exploration noise)
     """
-    def __init__(self, num_in_pol, num_out_pol, num_in_critic, hidden_dim=64,
+    def __init__(self, num_in_pol, num_out_pol, num_in_critic, num_swag, hidden_dim=64,
                  lr=0.01, discrete_action=True):
         """
         Inputs:
@@ -34,13 +34,13 @@ class SWAGDDPGAgent(object):
         self.target_critic = MLPNetwork(num_in_critic, 1,
                                         hidden_dim=hidden_dim,
                                         constrain_out=False)
-        self.policy_sample = MLPNetwork(num_in_pol, num_out_pol,
-                                 hidden_dim=hidden_dim,
-                                 constrain_out=True,
-                                 discrete_action=discrete_action)
+        #self.policy_sample = MLPNetwork(num_in_pol, num_out_pol,
+        #                         hidden_dim=hidden_dim,
+        #                         constrain_out=True,
+        #                         discrete_action=discrete_action)
         hard_update(self.target_policy, self.policy)
         hard_update(self.target_critic, self.critic)
-        hard_update(self.policy_sample, self.policy)
+        #hard_update(self.policy_sample, self.policy)
 
         self.policy_optimizer = Adam(self.policy.parameters(), lr=lr)
         self.critic_optimizer = Adam(self.critic.parameters(), lr=lr)
@@ -49,9 +49,13 @@ class SWAGDDPGAgent(object):
         else:
             self.exploration = 0.3  # epsilon for eps-greedy
         self.discrete_action = discrete_action
-
-        self.swag_network = SWAG(self.policy)
-        #self.policy_sample = deepcopy(self.policy)
+        self.num_swag = num_swag
+        self.policy_sample_list = []
+        for _ in range(self.num_swag):
+            policy_sample = deepcopy(self.policy)
+            self.policy_sample_list.append(policy_sample)
+        #self.policy_sample_list = [self.policy_sample for _ in range(self.num_swag)]
+        self.swag_network = SWAG(self.policy, self.policy_sample_list)
 
     def reset_noise(self):
         if not self.discrete_action:
@@ -72,7 +76,10 @@ class SWAGDDPGAgent(object):
         Outputs:
             action (PyTorch Variable): Actions for this agent
         """
-        action = self.policy_sample(obs)
+
+        action = torch.zeros(1,5)
+        for i in range(self.num_swag):
+            action += self.policy_sample_list[i](obs)/self.num_swag
         if self.discrete_action:
             if explore:
                 action = gumbel_softmax(action, hard=True)

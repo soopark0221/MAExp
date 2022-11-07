@@ -14,7 +14,7 @@ class MADDPG(object):
     Wrapper class for DDPG-esque (i.e. also MADDPG) agents in multi-agent task
     """
     def __init__(self, agent_init_params, alg_types,
-                 gamma=0.99, tau=0.01, lr=0.01, swag_lr=0.001, hidden_dim=64,
+                 gamma=0.99, tau=0.01, lr=0.01, swag_lr=0.001, hidden_dim=64, num_swag=3,
                  discrete_action=False):
         """
         Inputs:
@@ -40,7 +40,7 @@ class MADDPG(object):
                                  hidden_dim=hidden_dim,
                                  **params))
             elif alg_types[i] == 'SWAG':
-                self.agents.append(SWAGDDPGAgent(lr=swag_lr, discrete_action=discrete_action,
+                self.agents.append(SWAGDDPGAgent(lr=swag_lr, discrete_action=discrete_action, num_swag=num_swag,
                                  hidden_dim=hidden_dim,
                                  **params))
             else:
@@ -58,6 +58,7 @@ class MADDPG(object):
         self.trgt_pol_dev = 'cpu'  # device for target policies
         self.trgt_critic_dev = 'cpu'  # device for target critics
         self.niter = 0
+        self.num_swag = num_swag
 
     @property
     def policies(self):
@@ -231,7 +232,8 @@ class MADDPG(object):
         for idx, a in enumerate(self.agents):
             a.policy.eval()
             if self.alg_types[idx] == 'SWAG':
-                a.policy_sample.eval()
+                for i in range(self.num_swag):
+                    a.policy_sample_list[i].eval()
 
         if device == 'gpu':
             fn = lambda x: x.cuda()
@@ -254,7 +256,7 @@ class MADDPG(object):
 
     @classmethod
     def init_from_env(cls, env, agent_alg="MADDPG", adversary_alg="MADDPG",
-                      gamma=0.99, tau=0.01, lr=0.01, swag_lr=0.001, hidden_dim=64):
+                      gamma=0.99, tau=0.01, lr=0.01, swag_lr=0.001, num_swag=1, hidden_dim=64):
         """
         Instantiate instance of this class from multi-agent environment
         """
@@ -283,7 +285,7 @@ class MADDPG(object):
             agent_init_params.append({'num_in_pol': num_in_pol,
                                       'num_out_pol': num_out_pol,
                                       'num_in_critic': num_in_critic})
-        init_dict = {'gamma': gamma, 'tau': tau, 'lr': lr, 'swag_lr' : swag_lr,
+        init_dict = {'gamma': gamma, 'tau': tau, 'lr': lr, 'swag_lr' : swag_lr, 'num_swag': num_swag,
                      'hidden_dim': hidden_dim,
                      'alg_types': alg_types,
                      'agent_init_params': agent_init_params,
@@ -306,7 +308,6 @@ class MADDPG(object):
         return instance
 
 
-
     def collect_params(self):
         for idx, a in enumerate(self.agents):
             if self.alg_types[idx] == 'SWAG':
@@ -315,8 +316,17 @@ class MADDPG(object):
     def sample_params(self):
         for idx, a in enumerate(self.agents):
             if self.alg_types[idx] == 'SWAG':
-                a.swag_network.sample(a.policy_sample)
-
+                #w0 = self.flatten([param.detach().cpu() for param in a.policy_sample_list[0].parameters()])
+                #w1 = self.flatten([param.detach().cpu() for param in a.policy_sample_list[1].parameters()])
+                #w2 = self.flatten([param.detach().cpu() for param in a.policy_sample_list[2].parameters()])
+                #print('-------------------before=============')
+                #print(w0,w1,w2)
+                a.swag_network.sample()
+                #w0 = self.flatten([param.detach().cpu() for param in a.policy_sample_list[0].parameters()])
+                #w1 = self.flatten([param.detach().cpu() for param in a.policy_sample_list[1].parameters()])
+                #w2 = self.flatten([param.detach().cpu() for param in a.policy_sample_list[2].parameters()])
+                #print('-------------------after=============')
+                #print(w0,w1,w2)
 
     def flatten(self, lst):
         tmp = [i.contiguous().view(-1,1) for i in lst]

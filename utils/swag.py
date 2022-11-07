@@ -1,8 +1,9 @@
 import torch
 
 class SWAG:
-    def __init__(self, base_model):
+    def __init__(self, base_model, target_model_list):
         self.base_model = base_model
+        self.target_model_list = target_model_list
         self.num_parameters = sum(param.numel() for param in self.base_model.parameters())
         self.var_clamp = 1e-30
         self.n = 0
@@ -25,23 +26,21 @@ class SWAG:
         return self.mean, variance
 
 
-    def sample(self, update_model, scale=0.5, diag_noise=True):
+    def sample(self, scale=0.5, diag_noise=True):
         mean, variance = self._get_mean_and_variance()
-
         self.cov_factor = self.cov_mat_sqrt.clone() / (self.cov_mat_sqrt.size(0) - 1) ** 0.5  # 1/(sqrt(K-1)) x D : K x n_param
 
-        eps_low_rank = torch.randn(self.cov_factor.size()[0]) # z2 (size K)
-        z = self.cov_factor.t() @ eps_low_rank # n_param (1 x n_param?)
+        for i in range(len(self.target_model_list)):
+            eps_low_rank = torch.randn(self.cov_factor.size()[0]) # z2 (size K)
+            z = self.cov_factor.t() @ eps_low_rank # n_param (1 x n_param?)
 
-        if diag_noise:
-            z += variance.sqrt() * torch.rand(variance.size())  # sqrt(sigma_diag) x z1 (size n_param)
-        z *= scale ** 0.5  # 1/sqrt(2)
-        sample = mean + z
-
-        # apply to parameters
-        self.set_weights(update_model, sample, self.model_device)
+            if diag_noise:
+                z += variance.sqrt() * torch.rand(variance.size())  # sqrt(sigma_diag) x z1 (size n_param)
+            z *= scale ** 0.5  # 1/sqrt(2)
+            sample = mean + z
+            # apply to parameters
+            self.set_weights(self.target_model_list[i], sample, self.model_device)
         return sample
-
 
     def collect_model(self, base_model):
         w = self.flatten([param.detach().cpu() for param in base_model.parameters()])

@@ -69,6 +69,7 @@ def run(config):
                                   tau=config.tau,
                                   lr=config.lr,
                                   swag_lr=config.swag_lr,
+                                  num_swag=config.num_swag,
                                   hidden_dim=config.hidden_dim)
     elif config.alg == 'share':
         maddpg=MADDPG_Share.init_from_env(env, agent_alg=config.agent_alg,
@@ -227,6 +228,7 @@ if __name__ == '__main__':
     parser.add_argument("--alg", default='maddpg', type=str)
     parser.add_argument("--sample_freq", default=100, type=int)
     parser.add_argument("--collect_freq", default=2, type=int)
+    parser.add_argument("--num_swag", default=1, type=int)
     parser.add_argument("--display",
                         action='store_true')
     parser.add_argument("--gpu_no", default='0', type=str)
