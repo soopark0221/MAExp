@@ -59,7 +59,7 @@ class MADDPG(object):
         self.trgt_pol_dev = 'cpu'  # device for target policies
         self.trgt_critic_dev = 'cpu'  # device for target critics
         self.niter = 0
-        self.swag_start = 100
+        self.swag_start = swag_start
 
     @property
     def policies(self):
@@ -93,6 +93,17 @@ class MADDPG(object):
         """
         return [a.step(obs, explore=explore) for a, obs in zip(self.agents,
                                                                  observations)]
+    def step_maddpg(self, observations, explore=False):
+        """
+        Take a step forward in environment with all agents
+        Inputs:
+            observations: List of observations for each agent
+            explore (boolean): Whether or not to add exploration noise
+        Outputs:
+            actions: List of actions for each agent
+        """
+        return [a.step_maddpg(obs, explore=explore) if self.alg_types[i] == 'SWAG' else a.step(obs, explore=explore) 
+                for i, (a, obs) in enumerate(zip(self.agents, observations))]
 
     def update(self, sample, agent_i, parallel=False, logger=None):
         """

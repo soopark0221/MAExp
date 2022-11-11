@@ -28,7 +28,7 @@ class SWAG:
     def sample(self, update_model, scale=0.5, diag_noise=True):
         mean, variance = self._get_mean_and_variance()
 
-        self.cov_factor = self.cov_mat_sqrt.clone() / (self.cov_mat_sqrt.size(0) - 1) ** 0.5  # 1/(sqrt(K-1)) x D : K x n_param
+        self.cov_factor = self.cov_mat_sqrt.clone() / ((self.cov_mat_sqrt.size(0) - 1) ** 0.5)  # 1/(sqrt(K-1)) x D : K x n_param
 
         eps_low_rank = torch.randn(self.cov_factor.size()[0]) # z2 (size K)
         z = self.cov_factor.t() @ eps_low_rank # n_param (1 x n_param?)
