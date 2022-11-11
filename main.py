@@ -69,6 +69,7 @@ def run(config):
                                   tau=config.tau,
                                   lr=config.lr,
                                   swag_lr=config.swag_lr,
+                                  swag_start=config.swag_start,
                                   hidden_dim=config.hidden_dim)
     elif config.alg == 'share':
         maddpg=MADDPG_Share.init_from_env(env, agent_alg=config.agent_alg,
@@ -111,8 +112,8 @@ def run(config):
         if 'SWAG' in alg_types:
             if ep_i % config.collect_freq == 0:
                 maddpg.collect_params()  # collect actor network params 
-            if ep_i % config.sample_freq == 0:
-                maddpg.sample_params()  # update path collecting model
+            if ep_i >= config.swag_start and ep_i % config.sample_freq == 0:
+                maddpg.sample_params(scale = config.scale)  # update path collecting model
 
         for et_i in range(config.episode_length):
             # rearrange observations to be per agent, and convert to torch Variable
@@ -120,7 +121,7 @@ def run(config):
                                 requires_grad=False)
                         for i in range(maddpg.nagents)]
             # get actions as torch Variables
-            torch_agent_actions = maddpg.step(torch_obs, explore=True)
+            torch_agent_actions = maddpg.step(torch_obs, explore=False)
             # convert actions to numpy arrays
             agent_actions = [ac.data.detach().cpu().numpy() for ac in torch_agent_actions]
             # rearrange actions to be per environment
@@ -227,6 +228,8 @@ if __name__ == '__main__':
     parser.add_argument("--alg", default='maddpg', type=str)
     parser.add_argument("--sample_freq", default=100, type=int)
     parser.add_argument("--collect_freq", default=2, type=int)
+    parser.add_argument("--swag_start", default=50, type=int)
+    parser.add_argument("--scale", default=0.5, type=float)
     parser.add_argument("--display",
                         action='store_true')
     parser.add_argument("--gpu_no", default='0', type=str)

@@ -14,7 +14,7 @@ class MADDPG(object):
     Wrapper class for DDPG-esque (i.e. also MADDPG) agents in multi-agent task
     """
     def __init__(self, agent_init_params, alg_types,
-                 gamma=0.99, tau=0.01, lr=0.01, swag_lr=0.001, hidden_dim=64,
+                 gamma=0.99, tau=0.01, lr=0.01, swag_lr=0.001, swag_start=100, hidden_dim=64,
                  discrete_action=False):
         """
         Inputs:
@@ -40,7 +40,7 @@ class MADDPG(object):
                                  hidden_dim=hidden_dim,
                                  **params))
             elif alg_types[i] == 'SWAG':
-                self.agents.append(SWAGDDPGAgent(lr=swag_lr, discrete_action=discrete_action,
+                self.agents.append(SWAGDDPGAgent(lr=swag_lr, swag_start=swag_start, discrete_action=discrete_action,
                                  hidden_dim=hidden_dim,
                                  **params))
             else:
@@ -52,12 +52,14 @@ class MADDPG(object):
         self.gamma = gamma
         self.tau = tau
         self.lr = lr
+        self.swag_lr = swag_lr
         self.discrete_action = discrete_action
         self.pol_dev = 'cpu'  # device for policies
         self.critic_dev = 'cpu'  # device for critics
         self.trgt_pol_dev = 'cpu'  # device for target policies
         self.trgt_critic_dev = 'cpu'  # device for target critics
         self.niter = 0
+        self.swag_start = 100
 
     @property
     def policies(self):
@@ -184,9 +186,9 @@ class MADDPG(object):
             curr_agent.policy_optimizer.step()
 
         if self.alg_types[agent_i] == 'SWAG':
-            if self.niter % 100 == 0:
-                curr_agent.critic_optimizer.param_groups[0]['lr'] *= 0.98
-                curr_agent.policy_optimizer.param_groups[0]['lr'] *= 0.98
+            lr = self.schedule(self.niter)
+            curr_agent.critic_optimizer.param_groups[0]['lr'] = lr
+            curr_agent.policy_optimizer.param_groups[0]['lr'] = lr
 
         return vf_loss.detach(), pol_loss.detach()
 
@@ -254,7 +256,7 @@ class MADDPG(object):
 
     @classmethod
     def init_from_env(cls, env, agent_alg="MADDPG", adversary_alg="MADDPG",
-                      gamma=0.99, tau=0.01, lr=0.01, swag_lr=0.001, hidden_dim=64):
+                      gamma=0.99, tau=0.01, lr=0.01, swag_lr=0.001, swag_start=100, hidden_dim=64):
         """
         Instantiate instance of this class from multi-agent environment
         """
@@ -283,7 +285,7 @@ class MADDPG(object):
             agent_init_params.append({'num_in_pol': num_in_pol,
                                       'num_out_pol': num_out_pol,
                                       'num_in_critic': num_in_critic})
-        init_dict = {'gamma': gamma, 'tau': tau, 'lr': lr, 'swag_lr' : swag_lr,
+        init_dict = {'gamma': gamma, 'tau': tau, 'lr': lr, 'swag_lr' : swag_lr, 'swag_start':swag_start,
                      'hidden_dim': hidden_dim,
                      'alg_types': alg_types,
                      'agent_init_params': agent_init_params,
@@ -312,12 +314,23 @@ class MADDPG(object):
             if self.alg_types[idx] == 'SWAG':
                 a.swag_network.collect_model(a.policy)
 
-    def sample_params(self):
+    def sample_params(self, scale):
         for idx, a in enumerate(self.agents):
             if self.alg_types[idx] == 'SWAG':
-                a.swag_network.sample(a.policy_sample)
+                a.swag_network.sample(a.policy_sample, scale=scale)
 
 
     def flatten(self, lst):
         tmp = [i.contiguous().view(-1,1) for i in lst]
         return torch.cat(tmp).view(-1)
+
+    def schedule(self, epoch):
+        t = (epoch) / (self.swag_start)
+        lr_ratio = self.lr / self.swag_lr
+        if t <= 0.5:
+            factor = 1.0
+        elif t <= 0.9:
+            factor = 1.0 - (1.0 - lr_ratio) * (t - 0.5) / 0.4
+        else:
+            factor = lr_ratio
+        return self.swag_lr * factor
