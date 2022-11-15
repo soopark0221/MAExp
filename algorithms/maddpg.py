@@ -90,8 +90,16 @@ class MADDPG(object):
         Outputs:
             actions: List of actions for each agent
         """
-        return [a.step(obs, self.actor_ids[i] ,explore=explore) if self.alg_types[i]=='Boota'
-                else a.step(obs, explore=explore) for i, a, obs in zip(range(self.nagents),self.agents, observations)]
+        actions=[]
+        for i, a, obs in zip(range(self.nagents),self.agents,observations):
+            if self.alg_types[i]=='Boota':
+                actions.append(a.step(obs,self.actor_ids[i],explore=False))
+            elif self.alg_types[i]=='Bootc':
+                actions.append(a.step(obs,explore=False))
+            else:
+                actions.append(a.step(obs,explore=explore))
+
+        return actions
 
     def update(self, sample, agent_i, parallel=False, logger=None):
         """

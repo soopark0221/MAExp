@@ -170,6 +170,7 @@ def run(config):
                         total_aloss+=float(a_loss)
                     if (ep_i+1)%100==0:
                         if env.envs[0].shared_reward:
+                            epi_reward/=maddpg.nagents
                             print("Episode %i, epi_reward= %6.4f" % (ep_i, epi_reward/maddpg.nagents))
 
                         else:  
@@ -229,7 +230,7 @@ if __name__ == '__main__':
     parser.add_argument("--final_noise_scale", default=0.0, type=float)
     parser.add_argument("--save_interval", default=1000, type=int)
     parser.add_argument("--hidden_dim", default=64, type=int)
-    parser.add_argument("--lr", default=7e-4, type=float)
+    parser.add_argument("--lr", default=0.001, type=float)
     parser.add_argument("--tau", default=0.005, type=float)
     parser.add_argument("--agent_alg",
                         default="MADDPG", type=str,
