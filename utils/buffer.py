@@ -99,14 +99,14 @@ class ReplayBuffer(object):
 
 class BootaBuffer(ReplayBuffer):
     def __init__(self, max_steps, num_agents, obs_dims, ac_dims, num_ensemble=5):
-        super.__init__( max_steps, num_agents, obs_dims, ac_dims)
+        super().__init__( max_steps, num_agents, obs_dims, ac_dims)
         self.num_ensemble=num_ensemble
         self.actor_buffs=[]
 
-        for odim, adim in zip(obs_dims, ac_dims):
+        for _, _ in zip(obs_dims, ac_dims):
             self.actor_buffs.append(np.zeros(max_steps))
 
-    def push(self, observations, actions, rewards, next_observations, dones, actor_idx):
+    def push(self, observations, actions, rewards, next_observations, dones, actor_ids):
         nentries = observations.shape[0]  # handle multiple parallel environments
         if self.curr_i + nentries > self.max_steps:
             rollover = self.max_steps - self.curr_i # num of indices to roll over
@@ -134,7 +134,7 @@ class BootaBuffer(ReplayBuffer):
             self.next_obs_buffs[agent_i][self.curr_i:self.curr_i + nentries] = np.vstack(
                 next_observations[:, agent_i])
             self.done_buffs[agent_i][self.curr_i:self.curr_i + nentries] = dones[:, agent_i]
-            self.actor_buffs[agent_i][self.curr_i:self.curr_i+ nentries] = actor_idx[agent_i]
+            self.actor_buffs[agent_i][self.curr_i:self.curr_i+ nentries] = actor_ids[agent_i]
 
         self.curr_i += nentries
         if self.filled_i < self.max_steps:

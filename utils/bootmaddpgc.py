@@ -102,7 +102,10 @@ class BootcAgent(object):
         vf_loss=[]
         
         for head in range(self.n_ensemble):
-            mask=torch.tensor(np.random.binomial(self.n_ensemble,0.9,len(obs[0])))
+            if torch.cuda.is_available():
+                mask=torch.cuda.FloatTensor(np.random.binomial(self.n_ensemble,0.9,len(obs[0])))
+            else:
+                mask=torch.FloatTensor(np.random.binomial(self.n_ensemble,0.9,len(obs[0])))
             used=torch.sum(mask)
             closs = torch.nn.MSELoss(reduction='none')(actual_value[head], target_value[head].detach())
             closs*=mask.unsqueeze(1)

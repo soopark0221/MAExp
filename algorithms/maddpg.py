@@ -5,6 +5,7 @@ from utils.networks import MLPNetwork
 from utils.misc import soft_update, average_gradients, onehot_from_logits, gumbel_softmax
 from utils.agents import DDPGAgent
 from utils.bootmaddpgc import BootcAgent
+from utils.bootmaddpga import BootaAgent
 from utils.swag_agents import SWAGDDPGAgent
 
 MSELoss = torch.nn.MSELoss()
@@ -34,13 +35,16 @@ class MADDPG(object):
         self.nagents = len(alg_types)
         self.alg_types = alg_types
         self.agents=[]
+        self.actor_ids= None
         for i,params in enumerate(agent_init_params):
             if alg_types[i] == 'Bootc':
                 self.agents.append(BootcAgent(lr=lr, discrete_action=discrete_action,
                                  hidden_dim=hidden_dim,
                                  **params))
+            elif alg_types[i]== 'Boota':
+                self.agents.append(BootaAgent(lr=lr, discrete_action=discrete_action,
             elif alg_types[i] == 'SWAG':
-                self.agents.append(SWAGDDPGAgent(lr=swag_lr, swag_start=swag_start, discrete_action=discrete_action,
+                self.agents.append(SWAGDDPGAgent(lr=sw ag_lr, swag_start=swag_start, discrete_action=discrete_action,
                                  hidden_dim=hidden_dim,
                                  **params))
             else:
@@ -91,8 +95,9 @@ class MADDPG(object):
         Outputs:
             actions: List of actions for each agent
         """
-        return [a.step(obs, explore=explore) for a, obs in zip(self.agents,
-                                                                 observations)]
+        return [a.step(obs, self.actor_ids[i] ,explore=explore) if self.alg_types[i]=='Boota'
+                else a.step(obs, explore=explore) for i, a, obs in zip(range(self.nagents),self.agents, observations)]
+
     def step_maddpg(self, observations, explore=False):
         """
         Take a step forward in environment with all agents
@@ -118,52 +123,99 @@ class MADDPG(object):
             logger (SummaryWriter from Tensorboard-Pytorch):
                 If passed in, important quantities will be logged
         """
-
         
         if self.alg_types[agent_i] == 'Bootc':
             vf_loss, pol_loss=self.agents[agent_i].update(sample,agent_i,self.agents)
-        
-        else:
-            obs, acs, rews, next_obs, dones = sample
-            curr_agent = self.agents[agent_i]
 
-            curr_agent.critic_optimizer.zero_grad()
-            if self.alg_types[agent_i] == 'MADDPG' or self.alg_types[agent_i] == 'SWAG':
-                if self.discrete_action: # one-hot encode action
-                    all_trgt_acs = [onehot_from_logits(pi(nobs)) for pi, nobs in
-                                    zip(self.target_policies, next_obs)]
-                else:
-                    all_trgt_acs = [pi(nobs) for pi, nobs in zip(self.target_policies,
-                                                                next_obs)]
-                trgt_vf_in = torch.cat((*next_obs, *all_trgt_acs), dim=1)
-            elif self.alg_types[agent_i] == 'DDPG':  # DDPG
-                if self.discrete_action:
-                    trgt_vf_in = torch.cat((next_obs[agent_i],
+        elif self.alg_types[agent_i] == 'Boota':
+            vf_loss, pol_loss=self.agents[agent_i].update(sample,agent_i,self.agents)
+
+        else:
+            curr_agent = self.agents[agent_i]
+            if 'Boota' in self.alg_types:
+                obs, acs, rews, next_obs, dones, ids = sample
+                if self.alg_types[agent_i] == 'MADDPG':
+                
+                    curr_agent.critic_optimizer.zero_grad()
+                    all_trgt_acs=[]
+
+                    for a_i in range(len(acs)):
+                        for trgt in self.target_policies:
+                            trgt.eval()
+                        if self.discrete_action: # one-hot encode action
+                            all_trgt_acs.append(torch.stack([onehot_from_logits(self.target_policies[a_i](nobs.unsqueeze(0))).squeeze() if torch.isnan(ids[a_i][i]) 
+                                                    else onehot_from_logits(self.target_policies[a_i][int(ids[a_i][i])](nobs.unsqueeze(0))).squeeze() 
+                                                    for i, nobs in enumerate(next_obs[a_i])]))
+                        else:
+                            all_trgt_acs.append(torch.stack([self.target_policies[a_i](nobs.unsqueeze(0)).squeeze() if torch.isnan(ids[a_i][i]) 
+                                                    else self.target_policies[a_i][int(ids[a_i][i])](nobs.unsqueeze(0)).squeeze() 
+                                                    for i, nobs in enumerate(next_obs[a_i])]))
+
+                    trgt_vf_in = torch.cat((*next_obs, *all_trgt_acs), dim=1)
+                    target_value = (rews[agent_i].view(-1, 1) + self.gamma *
+                                    curr_agent.target_critic(trgt_vf_in) *
+                                    (1 - dones[agent_i].view(-1, 1)))
+                    vf_in = torch.cat((*obs, *acs), dim=1)
+                elif self.alg_types[agent_i] == 'DDPG':
+                    if self.discrete_action:
+                        trgt_vf_in = torch.cat((next_obs[agent_i],
                                             onehot_from_logits(
                                                 curr_agent.target_policy(
-                                                    next_obs[agent_i]))),
-                                        dim=1)
-                else:
-                    trgt_vf_in = torch.cat((next_obs[agent_i],
-                                            curr_agent.target_policy(next_obs[agent_i])),
-                                        dim=1)
-            target_value = (rews[agent_i].view(-1, 1) + self.gamma *
-                            curr_agent.target_critic(trgt_vf_in) *
-                            (1 - dones[agent_i].view(-1, 1)))
+                                                    next_obs[agent_i]))), dim=1)
+                    else:
+                        trgt_vf_in = torch.cat((next_obs[agent_i],
+                                            curr_agent.target_policy(next_obs[agent_i])), dim=1)
+                    target_value = (rews[agent_i].view(-1, 1) + self.gamma *
+                                    curr_agent.target_critic(trgt_vf_in) *
+                                    (1 - dones[agent_i].view(-1, 1)))
 
-            if self.alg_types[agent_i] == 'MADDPG' or self.alg_types[agent_i] == 'SWAG':
-                vf_in = torch.cat((*obs, *acs), dim=1)
-            elif self.alg_types[agent_i] == 'DDPG':  # DDPG
-                vf_in = torch.cat((obs[agent_i], acs[agent_i]), dim=1)
-            actual_value = curr_agent.critic(vf_in)
-            vf_loss = MSELoss(actual_value, target_value.detach())
-            vf_loss.backward()
-            if parallel:
-                average_gradients(curr_agent.critic)
-            torch.nn.utils.clip_grad_norm(curr_agent.critic.parameters(), 0.5)
-            curr_agent.critic_optimizer.step()
+                    vf_in = torch.cat((obs[agent_i], curr_pol_vf_in), dim=1)
+                    
+                actual_value = curr_agent.critic(vf_in)
+                    
+                loss_func=torch.nn.MSELoss()
+                vf_loss = loss_func(actual_value, target_value.detach())
+                vf_loss.backward()
+                torch.nn.utils.clip_grad_norm(curr_agent.critic.parameters(), 0.5)
+                curr_agent.critic_optimizer.step()
 
-            curr_agent.policy_optimizer.zero_grad()
+            else:
+                obs, acs, rews, next_obs, dones = sample
+                curr_agent = self.agents[agent_i]
+                curr_agent.critic_optimizer.zero_grad()
+                if self.alg_types[agent_i] == 'MADDPG' or self.alg_types[agent_i] == 'SWAG':
+                    if self.discrete_action: # one-hot encode action
+                        all_trgt_acs = [onehot_from_logits(pi(nobs)) for pi, nobs in
+                                        zip(self.target_policies, next_obs)]
+                    else:
+                        all_trgt_acs = [pi(nobs) for pi, nobs in zip(self.target_policies,
+                                                                next_obs)]
+                    trgt_vf_in = torch.cat((*next_obs, *all_trgt_acs), dim=1)
+                elif self.alg_types[agent_i] == 'DDPG':  # DDPG
+                    if self.discrete_action:
+                        trgt_vf_in = torch.cat((next_obs[agent_i],
+                                            onehot_from_logits(
+                                                curr_agent.target_policy(
+                                                    next_obs[agent_i]))), dim=1)
+                    else:
+                        trgt_vf_in = torch.cat((next_obs[agent_i],
+                                            curr_agent.target_policy(next_obs[agent_i])), dim=1)
+                target_value = (rews[agent_i].view(-1, 1) + self.gamma *
+                                curr_agent.target_critic(trgt_vf_in) *
+                                (1 - dones[agent_i].view(-1, 1)))
+
+                if self.alg_types[agent_i] == 'MADDPG' or self.alg_types[agent_i] == 'SWAG':
+                    vf_in = torch.cat((*obs, *acs), dim=1)
+                elif self.alg_types[agent_i] == 'DDPG':  # DDPG
+                    vf_in = torch.cat((obs[agent_i], acs[agent_i]), dim=1)
+                actual_value = curr_agent.critic(vf_in)
+                vf_loss = MSELoss(actual_value, target_value.detach())
+                vf_loss.backward()
+                if parallel:
+                    average_gradients(curr_agent.critic)
+                torch.nn.utils.clip_grad_norm(curr_agent.critic.parameters(), 0.5)
+                curr_agent.critic_optimizer.step()
+                curr_agent.policy_optimizer.zero_grad()
 
             if self.discrete_action:
                 # Forward pass as if onehot (hard=True) but backprop through a differentiable
@@ -190,6 +242,7 @@ class MADDPG(object):
                                 dim=1)
             pol_loss = -curr_agent.critic(vf_in).mean()
             pol_loss += (curr_pol_out**2).mean() * 1e-3
+
             pol_loss.backward()
             if parallel:
                 average_gradients(curr_agent.policy)

@@ -9,7 +9,7 @@ from pathlib import Path
 from torch.autograd import Variable
 from tensorboardX import SummaryWriter
 from utils.make_env import make_env
-from utils.buffer import ReplayBuffer
+from utils.buffer import ReplayBuffer, BootaBuffer
 from utils.env_wrappers import SubprocVecEnv, DummyVecEnv
 from algorithms.maddpg import MADDPG
 from algorithms.swagmaddpg import SWAGMADDPG
@@ -82,7 +82,7 @@ def run(config):
     alg_types = [config.adversary_alg if atype == 'adversary' else config.agent_alg for
                      atype in env.agent_types]
     if 'Boota' in alg_types:
-        replay_buffer = ReplayBuffer(config.buffer_length, maddpg.nagents,
+        replay_buffer = BootaBuffer(config.buffer_length, maddpg.nagents,
                                  [obsp.shape[0] for obsp in env.observation_space],
                                  [acsp.shape[0] if isinstance(acsp, Box) else acsp.n
                                   for acsp in env.action_space])
@@ -92,14 +92,16 @@ def run(config):
                                  [acsp.shape[0] if isinstance(acsp, Box) else acsp.n
                                   for acsp in env.action_space])
 
-
     for ep_i in range(0, config.n_episodes, config.n_rollout_threads):
-
+        
         epi_reward=0
         adv_reward=0
         ag_reward=0
         c_loss, a_loss= None, None
         total_closs, total_aloss = 0, 0
+        if 'Boota' in alg_types:
+            actor_ids=[np.random.randint(5) if alg=='Boota' else None for alg in alg_types]
+            maddpg.actor_ids=actor_ids
 
         obs = env.reset()
         # obs.shape = (n_rollout_threads, nagent)(nobs), nobs differs per agent so not tensor
@@ -138,7 +140,11 @@ def run(config):
                 import time
                 time.sleep(0.05)
                 env.render()
-            replay_buffer.push(obs, agent_actions, rewards, next_obs, dones)
+            if 'Boota' in alg_types:
+                replay_buffer.push(obs, agent_actions, rewards, next_obs, dones, actor_ids)
+            else:
+                replay_buffer.push(obs, agent_actions, rewards, next_obs, dones)
+            
             obs = next_obs
             epi_reward+=np.sum(np.array(rewards))
             adv_reward+=np.sum(np.array(rewards[0][:3]))
@@ -155,8 +161,13 @@ def run(config):
                 for u_i in range(config.n_rollout_threads):
                     total_closs, total_aloss=0,0
                     for a_i in range(maddpg.nagents):
-                        sample = replay_buffer.sample(config.batch_size,
+                        if 'Boota' in alg_types:
+                            sample = replay_buffer.sample_boot(config.batch_size,
                                                     to_gpu=USE_CUDA)
+                        else:
+                            sample = replay_buffer.sample(config.batch_size,
+                                                    to_gpu=USE_CUDA)
+
                         c_loss, a_loss=maddpg.update(sample, a_i, logger=logger)
                         total_closs+=float(c_loss)
                         total_aloss+=float(a_loss)
@@ -226,13 +237,13 @@ if __name__ == '__main__':
     parser.add_argument("--tau", default=0.005, type=float)
     parser.add_argument("--agent_alg",
                         default="MADDPG", type=str,
-                        choices=['MADDPG', 'DDPG', 'Bootc', 'SWAG'])
+                        choices=['MADDPG', 'DDPG', 'Bootc', 'Boota', 'SWAG'])
     parser.add_argument("--adversary_alg",
                         default="MADDPG", type=str,
-                        choices=['MADDPG', 'DDPG', 'Bootc', 'SWAG'])
+                        choices=['MADDPG', 'DDPG', 'Bootc','Boota', 'SWAG'])
     parser.add_argument("--discrete_action",
                         action='store_true')
-    parser.add_argument("--alg", default='maddpg', type=str)
+    parser.add_argument("--alg", default='maddpg', type=str, choices=['maddpg', 'share', 'swag(temporaily)'])
     parser.add_argument("--sample_freq", default=100, type=int)
     parser.add_argument("--collect_freq", default=2, type=int)
     parser.add_argument("--swag_start", default=200, type=int)
