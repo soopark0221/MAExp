@@ -13,7 +13,7 @@ class SWAGDDPGAgent(object):
     critic, exploration noise)
     """
     def __init__(self, num_in_pol, num_out_pol, num_in_critic, hidden_dim=64,
-                 lr=0.01, discrete_action=True):
+                 lr=0.01, swag_start=100, discrete_action=True):
         """
         Inputs:
             num_in_pol (int): number of dimensions for policy input
@@ -73,6 +73,28 @@ class SWAGDDPGAgent(object):
             action (PyTorch Variable): Actions for this agent
         """
         action = self.policy_sample(obs)
+        if self.discrete_action:
+            if explore:
+                action = gumbel_softmax(action, hard=True)
+            else:
+                action = onehot_from_logits(action)
+        else:  # continuous action
+            if explore:
+                action += Variable(Tensor(self.exploration.noise()),
+                                   requires_grad=False)
+            action = action.clamp(-1, 1)
+        return action
+
+    def step_maddpg(self, obs, explore=False):
+        """
+        Take a step forward in environment for a minibatch of observations
+        Inputs:
+            obs (PyTorch Variable): Observations for this agent
+            explore (boolean): Whether or not to add exploration noise
+        Outputs:
+            action (PyTorch Variable): Actions for this agent
+        """
+        action = self.policy(obs)
         if self.discrete_action:
             if explore:
                 action = gumbel_softmax(action, hard=True)

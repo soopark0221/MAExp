@@ -63,24 +63,20 @@ def run(config):
     epi_reward=0
     adv_reward=0
     
-
-    if config.alg == 'swag':
-        maddpg = SWAGMADDPG.init_from_env(env, agent_alg=config.agent_alg,
-                                  adversary_alg=config.adversary_alg,
-                                  tau=config.tau,
-                                  lr=config.lr,
-                                  hidden_dim=config.hidden_dim)
-    elif config.alg == 'maddpg':
+    if config.alg == 'maddpg':
         maddpg = MADDPG.init_from_env(env, agent_alg=config.agent_alg,
                                   adversary_alg=config.adversary_alg,
                                   tau=config.tau,
                                   lr=config.lr,
+                                  swag_lr=config.swag_lr,
+                                  swag_start=config.swag_start,
                                   hidden_dim=config.hidden_dim)
     elif config.alg == 'share':
         maddpg=MADDPG_Share.init_from_env(env, agent_alg=config.agent_alg,
                                   adversary_alg=config.adversary_alg,
                                   tau=config.tau,
                                   lr=config.lr,
+                                  swag_lr=config.swag_lr,
                                   hidden_dim=config.hidden_dim)
 
     alg_types = [config.adversary_alg if atype == 'adversary' else config.agent_alg for
@@ -115,11 +111,11 @@ def run(config):
         maddpg.scale_noise(config.final_noise_scale + (config.init_noise_scale - config.final_noise_scale) * explr_pct_remaining)
         maddpg.reset_noise()
 
-        if config.alg == 'swag':
-            if ep_i % config.collect_freq == 0:
+        if 'SWAG' in alg_types:
+            if ep_i >= config.n_epi_before_train and ep_i % config.collect_freq == 0:
                 maddpg.collect_params()  # collect actor network params 
-            if ep_i % config.sample_freq == 0:
-                maddpg.sample_params()  # update path collecting model
+            if ep_i >= config.swag_start and ep_i % config.sample_freq == 0:
+                maddpg.sample_params(scale = config.scale)  # update path collecting model
 
         for et_i in range(config.episode_length):
             # rearrange observations to be per agent, and convert to torch Variable
@@ -127,7 +123,14 @@ def run(config):
                                 requires_grad=False)
                         for i in range(maddpg.nagents)]
             # get actions as torch Variables
-            torch_agent_actions = maddpg.step(torch_obs, explore=True)
+            if 'SWAG' in alg_types:
+                if ep_i < config.swag_start:
+                    torch_agent_actions = maddpg.step_maddpg(torch_obs, explore=False)
+                elif ep_i >= config.swag_start:
+                    torch_agent_actions = maddpg.step(torch_obs, explore=False)
+            else:
+                torch_agent_actions = maddpg.step(torch_obs, explore=False)
+
             # convert actions to numpy arrays
             agent_actions = [ac.data.detach().cpu().numpy() for ac in torch_agent_actions]
             # rearrange actions to be per environment
@@ -230,18 +233,21 @@ if __name__ == '__main__':
     parser.add_argument("--save_interval", default=1000, type=int)
     parser.add_argument("--hidden_dim", default=64, type=int)
     parser.add_argument("--lr", default=7e-4, type=float)
+    parser.add_argument("--swag_lr", default=1e-3, type=float)
     parser.add_argument("--tau", default=0.005, type=float)
     parser.add_argument("--agent_alg",
                         default="MADDPG", type=str,
-                        choices=['MADDPG', 'DDPG', 'Bootc', 'Boota'])
+                        choices=['MADDPG', 'DDPG', 'Bootc', 'Boota', 'SWAG'])
     parser.add_argument("--adversary_alg",
                         default="MADDPG", type=str,
-                        choices=['MADDPG', 'DDPG', 'Bootc','Boota'])
+                        choices=['MADDPG', 'DDPG', 'Bootc','Boota', 'SWAG'])
     parser.add_argument("--discrete_action",
                         action='store_true')
     parser.add_argument("--alg", default='maddpg', type=str, choices=['maddpg', 'share', 'swag(temporaily)'])
     parser.add_argument("--sample_freq", default=100, type=int)
     parser.add_argument("--collect_freq", default=2, type=int)
+    parser.add_argument("--swag_start", default=200, type=int)
+    parser.add_argument("--scale", default=0.5, type=float)
     parser.add_argument("--display",
                         action='store_true')
     parser.add_argument("--gpu_no", default='0', type=str)
