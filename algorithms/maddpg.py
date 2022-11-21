@@ -43,8 +43,10 @@ class MADDPG(object):
                                  **params))
             elif alg_types[i]== 'Boota':
                 self.agents.append(BootaAgent(lr=lr, discrete_action=discrete_action,
+                                    hidden_dim=hidden_dim,
+                                 **params))
             elif alg_types[i] == 'SWAG':
-                self.agents.append(SWAGDDPGAgent(lr=sw ag_lr, swag_start=swag_start, discrete_action=discrete_action,
+                self.agents.append(SWAGDDPGAgent(lr=swag_lr, swag_start=swag_start, discrete_action=discrete_action,
                                  hidden_dim=hidden_dim,
                                  **params))
             else:

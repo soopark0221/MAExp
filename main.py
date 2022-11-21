@@ -112,11 +112,10 @@ def run(config):
         maddpg.reset_noise()
 
         if 'SWAG' in alg_types:
-            if ep_i >= config.n_epi_before_train and ep_i % config.collect_freq == 0:
+            if ep_i >= config.swag_start and ep_i % config.collect_freq == 0:
                 maddpg.collect_params()  # collect actor network params 
             if ep_i >= config.swag_start and ep_i % config.sample_freq == 0:
                 maddpg.sample_params(scale = config.scale)  # update path collecting model
-
         for et_i in range(config.episode_length):
             # rearrange observations to be per agent, and convert to torch Variable
             torch_obs = [Variable(torch.Tensor(np.vstack(obs[:, i])),
@@ -152,6 +151,8 @@ def run(config):
                 ag_reward+=np.sum(np.array(rewards[0][3:]))
 
             t += config.n_rollout_threads
+            
+
             if (ep_i>=config.n_epi_before_train and
                 (t % config.steps_per_update) < config.n_rollout_threads):
                 if USE_CUDA:
