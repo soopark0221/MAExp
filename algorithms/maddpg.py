@@ -7,7 +7,7 @@ from utils.agents import DDPGAgent
 from utils.bootmaddpgc import BootcAgent
 from utils.bootmaddpga import BootaAgent
 from utils.swag_agents import SWAGDDPGAgent
-
+import numpy as np
 MSELoss = torch.nn.MSELoss()
 
 class MADDPG(object):
@@ -15,8 +15,8 @@ class MADDPG(object):
     Wrapper class for DDPG-esque (i.e. also MADDPG) agents in multi-agent task
     """
     def __init__(self, agent_init_params, alg_types,
-                 gamma=0.99, tau=0.01, lr=0.01, swag_lr=0.001, swag_start=100, hidden_dim=64,
-                 discrete_action=False):
+                 gamma=0.99, tau=0.01, lr=0.01, swag_lr=0.001, swag_start=100, hidden_dim=64, 
+                 lr_cycle=False, discrete_action=False):
         """
         Inputs:
             agent_init_params (list of dict): List of dicts with parameters to
@@ -59,6 +59,7 @@ class MADDPG(object):
         self.tau = tau
         self.lr = lr
         self.swag_lr = swag_lr
+        self.lr_cycle = lr_cycle
         self.discrete_action = discrete_action
         self.pol_dev = 'cpu'  # device for policies
         self.critic_dev = 'cpu'  # device for critics
@@ -217,6 +218,7 @@ class MADDPG(object):
                     average_gradients(curr_agent.critic)
                 torch.nn.utils.clip_grad_norm(curr_agent.critic.parameters(), 0.5)
                 curr_agent.critic_optimizer.step()
+
                 curr_agent.policy_optimizer.zero_grad()
 
             if self.discrete_action:
@@ -251,12 +253,29 @@ class MADDPG(object):
             torch.nn.utils.clip_grad_norm(curr_agent.policy.parameters(), 0.5)
             curr_agent.policy_optimizer.step()
 
+        step_size = 10
+        max_lr= 0.0008
+        base_lr= 0.012
         if self.alg_types[agent_i] == 'SWAG':
-            lr = self.schedule(self.niter)
-            curr_agent.critic_optimizer.param_groups[0]['lr'] = lr
-            curr_agent.policy_optimizer.param_groups[0]['lr'] = lr
+            if self.lr_cycle == True:
+                if self.niter < (self.swag_start)//4:
+                    lr = self.schedule(self.niter)
+                    #curr_agent.critic_optimizer.param_groups[0]['lr'] = lr
+                    curr_agent.policy_optimizer.param_groups[0]['lr'] = lr
+                if self.niter >=  (self.swag_start)//4:
+                    cycle = np.floor(1+self.niter/(2*step_size))
+                    x = np.abs(self.niter/step_size - 2*cycle + 1)
+                    lr = base_lr + (max_lr-base_lr)*np.maximum(0, (1-x))
+                    curr_agent.policy_optimizer.param_groups[0]['lr'] = lr
+            else:
+                lr = self.schedule(self.niter)
+                #curr_agent.critic_optimizer.param_groups[0]['lr'] = lr
+                curr_agent.policy_optimizer.param_groups[0]['lr'] = lr
 
-        return vf_loss.detach(), pol_loss.detach()
+        else:
+            lr = self.lr
+
+        return vf_loss.detach(), pol_loss.detach(), lr
 
     def update_all_targets(self):
         """
@@ -322,7 +341,7 @@ class MADDPG(object):
 
     @classmethod
     def init_from_env(cls, env, agent_alg="MADDPG", adversary_alg="MADDPG",
-                      gamma=0.99, tau=0.01, lr=0.01, swag_lr=0.001, swag_start=100, hidden_dim=64):
+                      gamma=0.99, tau=0.01, lr=0.01, swag_lr=0.001, lr_cycle=False, swag_start=100, hidden_dim=64):
         """
         Instantiate instance of this class from multi-agent environment
         """
@@ -351,7 +370,8 @@ class MADDPG(object):
             agent_init_params.append({'num_in_pol': num_in_pol,
                                       'num_out_pol': num_out_pol,
                                       'num_in_critic': num_in_critic})
-        init_dict = {'gamma': gamma, 'tau': tau, 'lr': lr, 'swag_lr' : swag_lr, 'swag_start':swag_start,
+        init_dict = {'gamma': gamma, 'tau': tau, 'lr': lr,
+                     'swag_lr' : swag_lr, 'swag_start':swag_start, 'lr_cycle':lr_cycle,
                      'hidden_dim': hidden_dim,
                      'alg_types': alg_types,
                      'agent_init_params': agent_init_params,
@@ -391,12 +411,12 @@ class MADDPG(object):
         return torch.cat(tmp).view(-1)
 
     def schedule(self, epoch):
-        t = (epoch) / (self.swag_start)
+        t = (epoch) / ((self.swag_start)//4)
         lr_ratio = self.lr / self.swag_lr
-        if t <= 0.5:
+        if t <= 0.5: #0.5
             factor = 1.0
         elif t <= 0.9:
-            factor = 1.0 - (1.0 - lr_ratio) * (t - 0.5) / 0.4
+            factor = 1.0 - (1.0 - lr_ratio) * (t - 0.5) / 0.4 #0.5 / 0.4
         else:
             factor = lr_ratio
         return self.swag_lr * factor

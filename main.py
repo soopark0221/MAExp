@@ -70,6 +70,7 @@ def run(config):
                                   lr=config.lr,
                                   swag_lr=config.swag_lr,
                                   swag_start=config.swag_start,
+                                  lr_cycle=config.lr_cycle,
                                   hidden_dim=config.hidden_dim)
     elif config.alg == 'share':
         maddpg=MADDPG_Share.init_from_env(env, agent_alg=config.agent_alg,
@@ -112,9 +113,9 @@ def run(config):
         maddpg.reset_noise()
 
         if 'SWAG' in alg_types:
-            if ep_i >= config.swag_start and ep_i % config.collect_freq == 0:
+            if ep_i >= config.swag_start and (ep_i-config.swag_start) % config.collect_freq == 0:
                 maddpg.collect_params()  # collect actor network params 
-            if ep_i >= config.swag_start and ep_i % config.sample_freq == 0:
+            if ep_i >= config.swag_start and (ep_i-config.swag_start) % config.sample_freq == 0:
                 maddpg.sample_params(scale = config.scale)  # update path collecting model
         for et_i in range(config.episode_length):
             # rearrange observations to be per agent, and convert to torch Variable
@@ -123,12 +124,12 @@ def run(config):
                         for i in range(maddpg.nagents)]
             # get actions as torch Variables
             if 'SWAG' in alg_types:
-                if ep_i < config.swag_start:
+                if ep_i < (config.swag_start+config.sample_freq):
                     torch_agent_actions = maddpg.step_maddpg(torch_obs, explore=False)
-                elif ep_i >= config.swag_start:
+                elif ep_i >= (config.swag_start+config.sample_freq):
                     torch_agent_actions = maddpg.step(torch_obs, explore=False)
             else:
-                torch_agent_actions = maddpg.step(torch_obs, explore=False)
+                torch_agent_actions = maddpg.step(torch_obs, explore=True)
 
             # convert actions to numpy arrays
             agent_actions = [ac.data.detach().cpu().numpy() for ac in torch_agent_actions]
@@ -169,7 +170,7 @@ def run(config):
                             sample = replay_buffer.sample(config.batch_size,
                                                     to_gpu=USE_CUDA)
 
-                        c_loss, a_loss=maddpg.update(sample, a_i, logger=logger)
+                        c_loss, a_loss, lr =maddpg.update(sample, a_i, logger=logger)
                         total_closs+=float(c_loss)
                         total_aloss+=float(a_loss)
                     if (ep_i+1)%100==0:
@@ -192,6 +193,7 @@ def run(config):
             if (total_closs, total_aloss) != (0, 0):
                 logger.add_scalar('losses/c_loss', total_closs/maddpg.nagents,ep_i)
                 logger.add_scalar('losses/a_loss', total_aloss/maddpg.nagents,ep_i)
+                logger.add_scalar('lrs/lr', lr,ep_i)
 
             
 
@@ -234,7 +236,7 @@ if __name__ == '__main__':
     parser.add_argument("--save_interval", default=1000, type=int)
     parser.add_argument("--hidden_dim", default=64, type=int)
     parser.add_argument("--lr", default=7e-4, type=float)
-    parser.add_argument("--swag_lr", default=1e-3, type=float)
+    parser.add_argument("--swag_lr", default=1e-2, type=float)
     parser.add_argument("--tau", default=0.005, type=float)
     parser.add_argument("--agent_alg",
                         default="MADDPG", type=str,
@@ -246,8 +248,9 @@ if __name__ == '__main__':
                         action='store_true')
     parser.add_argument("--alg", default='maddpg', type=str, choices=['maddpg', 'share', 'swag(temporaily)'])
     parser.add_argument("--sample_freq", default=100, type=int)
-    parser.add_argument("--collect_freq", default=2, type=int)
-    parser.add_argument("--swag_start", default=200, type=int)
+    parser.add_argument("--collect_freq", default=4, type=int)
+    parser.add_argument("--swag_start", default=20000, type=int)
+    parser.add_argument("--lr_cycle", action='store_true')
     parser.add_argument("--scale", default=0.5, type=float)
     parser.add_argument("--display",
                         action='store_true')
