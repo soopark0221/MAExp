@@ -113,7 +113,7 @@ class MADDPG(object):
         return [a.step_maddpg(obs, explore=explore) if self.alg_types[i] == 'SWAG' else a.step(obs, explore=explore) 
                 for i, (a, obs) in enumerate(zip(self.agents, observations))]
 
-    def update(self, sample, agent_i, parallel=False, logger=None):
+    def update(self, sample, agent_i, parallel=False, logger=None, collect_freq=80):
         """
         Update parameters of agent model based on sample from replay buffer
         Inputs:
@@ -253,9 +253,9 @@ class MADDPG(object):
             torch.nn.utils.clip_grad_norm(curr_agent.policy.parameters(), 0.5)
             curr_agent.policy_optimizer.step()
 
-        step_size = 10
+        step_size = collect_freq//8  
         max_lr= 0.0008
-        base_lr= 0.012
+        base_lr= 0.006
         if self.alg_types[agent_i] == 'SWAG':
             if self.lr_cycle == True:
                 if self.niter < (self.swag_start)//4:

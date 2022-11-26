@@ -170,7 +170,7 @@ def run(config):
                             sample = replay_buffer.sample(config.batch_size,
                                                     to_gpu=USE_CUDA)
 
-                        c_loss, a_loss, lr =maddpg.update(sample, a_i, logger=logger)
+                        c_loss, a_loss, lr =maddpg.update(sample, a_i, logger=logger, collect_freq=config.collect_freq)
                         total_closs+=float(c_loss)
                         total_aloss+=float(a_loss)
                     if (ep_i+1)%100==0:
