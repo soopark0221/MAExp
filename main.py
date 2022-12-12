@@ -178,7 +178,7 @@ def run(config):
                             print("Episode %i, epi_reward= %6.4f" % (ep_i, epi_reward/maddpg.nagents))
 
                         else:  
-                            print("Episode %i, adv_reward= %6.4f & agent_rew= %6.4f" % (ep_i, adv_reward, ag_reward))
+                            print("Episode %i, epi_reward= %6.4f adv_reward= %6.4f agent_rew= %6.4f" % (ep_i, epi_reward, adv_reward, ag_reward))
                         
                         print(f"c_loss: {round(total_closs/maddpg.nagents,4)} a_loss: {round(total_aloss/maddpg.nagents,4)}")
 
